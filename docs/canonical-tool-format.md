@@ -100,6 +100,14 @@ evaluated by `validateValue`).
 reports that it could not be verified rather than passing silently. Recursive
 schemas are therefore not supported.
 
+**Boolean subschemas are rejected.** JSON Schema permits `{"properties": {"x": true}}`
+and `{"items": false}`, but SchemaPort's canonical format does not accept them.
+The schema walker only descends into objects, so a boolean would be skipped
+silently and the property could disappear from compiled output with no
+diagnostic. Loading fails with a clear message instead. Use `{}` to accept any
+value, or omit the entry to disallow it. `additionalProperties` is exempt — a
+boolean is its normal form there.
+
 Unknown keywords are preserved in the loaded schema rather than stripped, so
 nothing is silently lost before a provider adapter sees it.
 
@@ -110,6 +118,9 @@ nothing is silently lost before a provider adapter sees it.
   workflow works first; source adapters can be added cleanly on top later.
 - No `$ref` resolution, no recursive schemas, no `if`/`then`/`else`, no
   `dependentSchemas`, no `patternProperties`.
+- No boolean subschemas, and no `outputSchema`. The canonical format describes a
+  tool's *arguments* only. MCP's `outputSchema` and provider structured-output
+  response schemas are out of scope for 0.1.0.
 
 ## Schema paths
 

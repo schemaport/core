@@ -55,9 +55,21 @@ Initial release.
   and lossy compilation, breaking-change rules, and the provider adapter
   contract.
 
+### Determinism
+
+Every ordering helper compares strings by code point rather than with
+`localeCompare`, which is locale- and ICU-sensitive. Identical inputs therefore
+sort identically on every machine, which is what makes compiled output safe to
+commit and review.
+
 ### Known limitations
 
 - `$ref` is never resolved; recursive schemas are unsupported.
+- Boolean subschemas (`{"properties": {"x": true}}`) are rejected rather than
+  silently skipped. `additionalProperties` still accepts a boolean.
+- `CanonicalTool` describes tool *arguments* only. There is no `outputSchema`,
+  so MCP's `outputSchema` and provider structured-output response schemas cannot
+  be expressed or compiled.
 - `if`/`then`/`else`, `dependentSchemas`, `patternProperties` and `not` are not
   evaluated.
 - Diff performs structural comparison, not general JSON Schema subsumption.
