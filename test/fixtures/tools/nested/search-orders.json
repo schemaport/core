@@ -1,0 +1,9 @@
+{
+  "name": "search_orders",
+  "description": "Searches orders",
+  "inputSchema": {
+    "type": "object",
+    "properties": { "customerId": { "type": "string" } },
+    "required": ["customerId"]
+  }
+}

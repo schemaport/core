@@ -1,0 +1,12 @@
+{
+  "name": "refund_order",
+  "description": "Refunds all or part of an order",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "orderId": { "type": "string", "description": "The order to refund" },
+      "amount": { "type": "number", "minimum": 0 }
+    },
+    "required": ["orderId"]
+  }
+}

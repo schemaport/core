@@ -1,0 +1,10 @@
+[
+  {
+    "name": "alpha_tool",
+    "inputSchema": { "type": "object", "properties": { "a": { "type": "string" } } }
+  },
+  {
+    "name": "beta_tool",
+    "inputSchema": { "type": "object", "properties": { "b": { "type": "boolean" } } }
+  }
+]

@@ -1,0 +1,4 @@
+{
+  "name": "dangling",
+  "inputSchema": { "type": "object", "properties": {}, "required": ["missing"] }
+}
