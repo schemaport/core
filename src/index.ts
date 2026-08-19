@@ -35,6 +35,7 @@ export {
   asSchema,
   cloneSchema,
   collectSchemas,
+  compareStrings,
   deepEqual,
   isPlainObject,
   isType,
