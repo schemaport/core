@@ -163,7 +163,14 @@ export function classifyProviderError(error: unknown): {
   if (status === 404) return { kind: 'model-not-found', detail };
   if (status !== undefined && status >= 500) return { kind: 'network', detail };
   if (status === 400 || status === 422) {
-    if (message.includes('model') && (message.includes('not found') || message.includes('does not exist'))) {
+    // A 400 usually means the request body was invalid, which for us means the
+    // schema was rejected. Providers also return 400 for a bad model id, so we
+    // carve that out — but only when the message does not also look like a
+    // schema complaint. A rejection mentioning `GenerateContentRequest.model`
+    // must stay a rejection rather than being excused as an environment problem.
+    const looksLikeMissingModel = /\bmodel\b[^.]{0,60}?(not found|does not exist|is not supported)/.test(message);
+    const looksLikeSchemaComplaint = /\b(schema|parameters|function|tool|property|properties|required|json)\b/.test(message);
+    if (looksLikeMissingModel && !looksLikeSchemaComplaint) {
       return { kind: 'model-not-found', detail };
     }
     return { kind: 'rejected', detail };
@@ -236,14 +243,21 @@ export function probePrompt(tool: CanonicalTool): string {
   );
 }
 
-/** Resolve the probe model: explicit option, then environment override, then default. */
+/**
+ * Resolve the probe model: explicit option, then environment override, then
+ * default. An empty environment variable counts as unset — otherwise
+ * `SCHEMAPORT_OPENAI_MODEL=` would make the probe request `model: ''`.
+ */
 export function resolveProbeModel(
   explicit: string | undefined,
   envVar: string,
   fallback: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  return explicit ?? env[envVar] ?? fallback;
+  if (explicit !== undefined && explicit.length > 0) return explicit;
+  const fromEnv = env[envVar];
+  if (fromEnv !== undefined && fromEnv.length > 0) return fromEnv;
+  return fallback;
 }
 
 /** Resolve an API key: explicit option first, then the provider's environment variable. */

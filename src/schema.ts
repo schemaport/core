@@ -143,6 +143,17 @@ export function collectSchemas(root: JsonSchema, rootPath: string): SchemaVisit[
   return out;
 }
 
+/**
+ * Compare two strings by code point.
+ *
+ * Deliberately not `localeCompare`: that is locale- and ICU-sensitive, so the
+ * same inputs can sort differently on different machines. Every ordering in
+ * SchemaPort is part of its determinism guarantee, so all of them use this.
+ */
+export function compareStrings(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /** Structural equality for plain JSON values. Object key order is ignored. */
 export function deepEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

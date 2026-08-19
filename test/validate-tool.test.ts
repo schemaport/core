@@ -103,6 +103,45 @@ describe('validateCanonicalTool', () => {
     expect(issues[0]?.message).toContain('not a valid regular expression');
   });
 
+  it('rejects a boolean subschema instead of silently skipping it', () => {
+    const issues = validateCanonicalTool({
+      name: 'x',
+      inputSchema: { type: 'object', properties: { anything: true } },
+    });
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message).toContain('does not support boolean subschemas');
+    expect(issues[0]?.path).toBe('inputSchema.properties.anything');
+  });
+
+  it('rejects boolean subschemas in items and composition branches', () => {
+    const issues = validateCanonicalTool({
+      name: 'x',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          list: { type: 'array', items: false },
+          either: { anyOf: [{ type: 'string' }, true] },
+        },
+      },
+    });
+
+    // Issues come back in traversal order, which follows property declaration order.
+    expect(issues.map((issue) => issue.path)).toEqual([
+      'inputSchema.properties.list.items',
+      'inputSchema.properties.either.anyOf[1]',
+    ]);
+  });
+
+  it('still accepts a boolean additionalProperties, which is its normal form', () => {
+    expect(
+      validateCanonicalTool({
+        name: 'x',
+        inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      }),
+    ).toEqual([]);
+  });
+
   it('applies a base path so callers can report array positions', () => {
     const issues = validateCanonicalTool({ inputSchema: { type: 'object' } }, '[2]');
 

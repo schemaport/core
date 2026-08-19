@@ -5,7 +5,7 @@ import type {
   JsonSchema,
   SchemaChange,
 } from './types.js';
-import { asSchema, deepEqual, isPlainObject, joinPath, schemaTypes } from './schema.js';
+import { asSchema, compareStrings, deepEqual, isPlainObject, joinPath, schemaTypes } from './schema.js';
 
 /**
  * Structural comparison of canonical tool schemas.
@@ -120,10 +120,10 @@ const CLASSIFICATION_ORDER: Record<ChangeClassification, number> = {
 function sortChanges(changes: readonly SchemaChange[]): SchemaChange[] {
   return [...changes].sort(
     (a, b) =>
-      a.toolName.localeCompare(b.toolName) ||
+      compareStrings(a.toolName, b.toolName) ||
       CLASSIFICATION_ORDER[a.classification] - CLASSIFICATION_ORDER[b.classification] ||
-      a.path.localeCompare(b.path) ||
-      a.code.localeCompare(b.code),
+      compareStrings(a.path, b.path) ||
+      compareStrings(a.code, b.code),
   );
 }
 

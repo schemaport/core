@@ -68,6 +68,8 @@ function validateSubschemas(root: JsonSchema, rootPath: string): ToolValidationI
   const issues: ToolValidationIssue[] = [];
 
   for (const { schema, path } of collectSchemas(root, rootPath)) {
+    issues.push(...findBooleanSubschemas(schema, path));
+
     for (const type of schemaTypes(schema)) {
       if (!KNOWN_TYPES.has(type)) {
         issues.push({
@@ -124,6 +126,51 @@ function validateSubschemas(root: JsonSchema, rootPath: string): ToolValidationI
         }
       }
     }
+  }
+
+  return issues;
+}
+
+/**
+ * Reject boolean subschemas such as `{"properties": {"x": true}}`.
+ *
+ * JSON Schema permits them, but SchemaPort's canonical format does not: the
+ * schema walker only descends into objects, so a boolean would be skipped
+ * silently and the property could vanish from compiled output with no
+ * diagnostic. Refusing loudly is the honest behaviour.
+ *
+ * `additionalProperties` is exempt — a boolean is its normal form.
+ */
+function findBooleanSubschemas(schema: JsonSchema, path: string): ToolValidationIssue[] {
+  const issues: ToolValidationIssue[] = [];
+  const advice =
+    'SchemaPort does not support boolean subschemas. Use `{}` to accept any value, ' +
+    'or remove the entry to disallow it.';
+
+  for (const keyword of ['properties', '$defs', 'definitions'] as const) {
+    const map = schema[keyword];
+    if (!isPlainObject(map)) continue;
+    for (const [key, value] of Object.entries(map)) {
+      if (typeof value === 'boolean') {
+        issues.push({ message: advice, path: joinPath(path, keyword, key) });
+      }
+    }
+  }
+
+  for (const keyword of ['items', 'not'] as const) {
+    if (typeof schema[keyword] === 'boolean') {
+      issues.push({ message: advice, path: joinPath(path, keyword) });
+    }
+  }
+
+  for (const keyword of ['prefixItems', 'anyOf', 'oneOf', 'allOf'] as const) {
+    const list = schema[keyword];
+    if (!Array.isArray(list)) continue;
+    list.forEach((value, index) => {
+      if (typeof value === 'boolean') {
+        issues.push({ message: advice, path: joinPath(path, keyword, index) });
+      }
+    });
   }
 
   return issues;

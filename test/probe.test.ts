@@ -131,6 +131,15 @@ describe('classifyProviderError', () => {
     expect(classifyProviderError(error).kind).toBe('model-not-found');
   });
 
+  it('keeps a schema rejection that happens to mention the model field', () => {
+    const error = {
+      status: 400,
+      message: 'Invalid JSON payload received. Unknown name "minLength" at GenerateContentRequest.model.tools',
+    };
+
+    expect(classifyProviderError(error).kind).toBe('rejected');
+  });
+
   it('classifies a 429 as a rate limit', () => {
     expect(classifyProviderError({ status: 429, message: 'Rate limit' }).kind).toBe('rate-limit');
   });
@@ -194,6 +203,11 @@ describe('resolveProbeModel and resolveApiKey', () => {
     const env = { SCHEMAPORT_OPENAI_MODEL: 'from-env' };
 
     expect(resolveProbeModel('explicit', 'SCHEMAPORT_OPENAI_MODEL', 'fallback', env)).toBe('explicit');
+  });
+
+  it('treats an empty model environment variable as unset', () => {
+    expect(resolveProbeModel(undefined, 'SCHEMAPORT_OPENAI_MODEL', 'fallback', { SCHEMAPORT_OPENAI_MODEL: '' })).toBe('fallback');
+    expect(resolveProbeModel('', 'SCHEMAPORT_OPENAI_MODEL', 'fallback', {})).toBe('fallback');
   });
 
   it('falls back to the environment, then to the default', () => {

@@ -1,4 +1,5 @@
 import type { CompileAbility, Diagnostic, DiagnosticSeverity } from './types.js';
+import { compareStrings } from './schema.js';
 
 export interface DiagnosticInit {
   providerId: string;
@@ -48,8 +49,8 @@ export function sortDiagnostics(diagnostics: readonly Diagnostic[]): Diagnostic[
   return [...diagnostics].sort(
     (a, b) =>
       SEVERITY_ORDER[a.severity] - SEVERITY_ORDER[b.severity] ||
-      a.path.localeCompare(b.path) ||
-      a.code.localeCompare(b.code),
+      compareStrings(a.path, b.path) ||
+      compareStrings(a.code, b.code),
   );
 }
 

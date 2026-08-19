@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import type { CanonicalTool, LoadError, LoadResult, LoadedTool } from './types.js';
-import { isPlainObject } from './schema.js';
+import { compareStrings, isPlainObject } from './schema.js';
 import { validateCanonicalTool } from './validate-tool.js';
 
 export interface LoadOptions {
@@ -58,8 +58,8 @@ export function loadTools(inputPath: string, options: LoadOptions = {}): LoadRes
     }
   }
 
-  tools.sort((a, b) => (a.tool.name < b.tool.name ? -1 : a.tool.name > b.tool.name ? 1 : 0));
-  errors.sort((a, b) => `${a.sourcePath}${a.message}`.localeCompare(`${b.sourcePath}${b.message}`));
+  tools.sort((a, b) => compareStrings(a.tool.name, b.tool.name));
+  errors.sort((a, b) => compareStrings(`${a.sourcePath}${a.message}`, `${b.sourcePath}${b.message}`));
 
   return { tools, errors };
 }
@@ -67,7 +67,7 @@ export function loadTools(inputPath: string, options: LoadOptions = {}): LoadRes
 function listJsonFiles(directory: string, recursive: boolean): string[] {
   const found: string[] = [];
   const entries = readdirSync(directory, { withFileTypes: true }).sort((a, b) =>
-    a.name.localeCompare(b.name),
+    compareStrings(a.name, b.name),
   );
 
   for (const entry of entries) {
