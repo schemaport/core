@@ -56,6 +56,18 @@ deterministic regardless of file-system ordering.
 Duplicate tool names across files are reported as errors — the compiled output
 directory is keyed by tool name, so duplicates would silently overwrite.
 
+Because the walk is recursive, this rule applies to the whole tree under the path
+you pass. A layout that keeps two versions of the same tool side by side, such as
+
+```
+examples/refund-order/v1/refund-order.json
+examples/refund-order/v2/refund-order.json
+```
+
+can be loaded as `.../v1` or `.../v2` — and diffed against each other — but not as
+`examples/refund-order`, which would see `refund_order` declared twice. Keep
+version directories as siblings and point commands at one of them.
+
 ## Supported JSON Schema
 
 SchemaPort targets the common cases well rather than implementing all of JSON
