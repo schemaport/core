@@ -81,7 +81,7 @@ export function diffToolSets(
     if (next) changes.push(...diffTools(tool, next));
   }
 
-  return summarizeChanges(changes);
+  return summarizeDiff(changes);
 }
 
 /** Compare two versions of the same tool. */
@@ -98,8 +98,11 @@ export function diffTools(before: CanonicalTool, after: CanonicalTool): SchemaCh
   return sortChanges(changes);
 }
 
-/** Group a flat change list into a `DiffResult` with counts. */
-export function summarizeChanges(changes: readonly SchemaChange[]): DiffResult {
+/**
+ * Group a flat change list into a `DiffResult`: the changes in canonical order,
+ * plus a count per classification.
+ */
+export function summarizeDiff(changes: readonly SchemaChange[]): DiffResult {
   const sorted = sortChanges(changes);
   return {
     changes: sorted,
@@ -110,6 +113,13 @@ export function summarizeChanges(changes: readonly SchemaChange[]): DiffResult {
     },
   };
 }
+
+/**
+ * @deprecated Renamed to {@link summarizeDiff}. This alias is the same function
+ * and will keep working; it is kept so dependent packages do not break. Prefer
+ * `summarizeDiff` in new code.
+ */
+export const summarizeChanges: typeof summarizeDiff = summarizeDiff;
 
 const CLASSIFICATION_ORDER: Record<ChangeClassification, number> = {
   breaking: 0,

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalTool, JsonSchema, SchemaChange } from '../src/types.js';
-import { diffToolSets, diffTools } from '../src/diff.js';
+import { diffToolSets, diffTools, summarizeChanges, summarizeDiff } from '../src/diff.js';
 import { refundOrderTool } from '../src/fixtures.js';
 
 /** Build a one-property tool so each rule can be exercised in isolation. */
@@ -312,5 +312,76 @@ describe('diffToolSets', () => {
 
     expect(result.changes).toEqual([]);
     expect(result.summary).toEqual({ breaking: 0, nonBreaking: 0, informational: 0 });
+  });
+});
+
+describe('summarizeDiff / summarizeChanges', () => {
+  const inputs: SchemaChange[][] = [
+    [],
+    [
+      {
+        classification: 'informational',
+        code: 'description-changed',
+        toolName: 'zeta',
+        path: 'inputSchema.description',
+        message: 'The description changed.',
+      },
+      {
+        classification: 'breaking',
+        code: 'property-removed',
+        toolName: 'alpha',
+        path: 'inputSchema.properties.value',
+        message: 'Property `value` was removed.',
+      },
+      {
+        classification: 'non-breaking',
+        code: 'optional-property-added',
+        toolName: 'alpha',
+        path: 'inputSchema.properties.extra',
+        message: 'Optional property `extra` was added.',
+      },
+    ],
+    diffTools(
+      refundOrderTool,
+      { ...refundOrderTool, description: 'Refund an order, maybe.' },
+    ),
+    diffToolSets(
+      [tool({ type: 'string', enum: ['a', 'b'] })],
+      [tool({ type: 'string', enum: ['a'] }, true)],
+    ).changes,
+  ];
+
+  it('exports both names', () => {
+    expect(typeof summarizeDiff).toBe('function');
+    expect(typeof summarizeChanges).toBe('function');
+  });
+
+  it('exposes summarizeChanges as an alias of the same function', () => {
+    expect(summarizeChanges).toBe(summarizeDiff);
+  });
+
+  it('returns identical results under either name', () => {
+    for (const changes of inputs) {
+      expect(summarizeChanges(changes)).toEqual(summarizeDiff(changes));
+      expect(JSON.stringify(summarizeChanges(changes))).toBe(JSON.stringify(summarizeDiff(changes)));
+    }
+  });
+
+  it('sorts changes and counts each classification', () => {
+    const result = summarizeDiff(inputs[1] as SchemaChange[]);
+
+    expect(result.changes.map((change) => change.code)).toEqual([
+      'property-removed',
+      'optional-property-added',
+      'description-changed',
+    ]);
+    expect(result.summary).toEqual({ breaking: 1, nonBreaking: 1, informational: 1 });
+  });
+
+  it('is re-exported from the package entry point under both names', async () => {
+    const entry = await import('../src/index.js');
+
+    expect(entry.summarizeDiff).toBe(summarizeDiff);
+    expect(entry.summarizeChanges).toBe(summarizeChanges);
   });
 });

@@ -5,6 +5,22 @@ All notable changes to `@schemaport/core` are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **`summarizeDiff`.** New name for the helper that groups a flat `SchemaChange[]`
+  into a `DiffResult` — the sorted changes plus a count per classification. The
+  behaviour and signature are unchanged; the name is more accurate, because the
+  function returns the diff result itself rather than a summary of it.
+
+### Deprecated
+
+- **`summarizeChanges`.** Deprecated in favour of `summarizeDiff`. It remains
+  exported and is the same function, so existing callers keep working with no
+  change; it is now marked `@deprecated` so editors surface the replacement. No
+  removal is scheduled.
+
 ## [0.1.0] — 2026-08-20
 
 Initial release.

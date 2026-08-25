@@ -84,7 +84,9 @@ export {
 } from './probe.js';
 export type { ProbeAcceptedInput } from './probe.js';
 
-export { diffToolSets, diffTools, summarizeChanges } from './diff.js';
+export { diffToolSets, diffTools, summarizeDiff } from './diff.js';
+/** @deprecated Renamed to `summarizeDiff`. The old name still works. */
+export { summarizeChanges } from './diff.js';
 
 export {
   FIXTURE_TOOLS,
