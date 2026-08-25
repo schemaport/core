@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { CanonicalTool, JsonSchema, SchemaChange } from '../src/types.js';
 import { diffToolSets, diffTools } from '../src/diff.js';
-import { refundOrderTool } from '../src/fixtures.js';
+import { recursiveTool, refundOrderTool } from '../src/fixtures.js';
 
 /** Build a one-property tool so each rule can be exercised in isolation. */
 function tool(property: JsonSchema, required = false, name = 'demo_tool'): CanonicalTool {
@@ -312,5 +312,148 @@ describe('diffToolSets', () => {
 
     expect(result.changes).toEqual([]);
     expect(result.summary).toEqual({ breaking: 0, nonBreaking: 0, informational: 0 });
+  });
+});
+
+describe('diffTools — reference resolution', () => {
+  const inline: CanonicalTool = {
+    name: 'demo_tool',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        value: { type: 'object', properties: { cents: { type: 'integer' } }, required: ['cents'] },
+      },
+    },
+  };
+
+  const referenced: CanonicalTool = {
+    name: 'demo_tool',
+    inputSchema: {
+      type: 'object',
+      $defs: {
+        Money: { type: 'object', properties: { cents: { type: 'integer' } }, required: ['cents'] },
+      },
+      properties: { value: { $ref: '#/$defs/Money' } },
+    },
+  };
+
+  it('reports no change when an inline subschema becomes an equivalent `$ref`', () => {
+    expect(diffTools(inline, referenced)).toEqual([]);
+  });
+
+  it('reports no change when a `$ref` is inlined again', () => {
+    expect(diffTools(referenced, inline)).toEqual([]);
+  });
+
+  it('reports no change through a set diff, so rename detection sees it too', () => {
+    expect(diffToolSets([inline], [referenced]).summary).toEqual({
+      breaking: 0,
+      nonBreaking: 0,
+      informational: 0,
+    });
+  });
+
+  it('still sees a real change made behind a `$ref`', () => {
+    const narrowed: CanonicalTool = {
+      name: 'demo_tool',
+      inputSchema: {
+        type: 'object',
+        $defs: {
+          Money: {
+            type: 'object',
+            properties: { cents: { type: 'integer', minimum: 0 } },
+            required: ['cents'],
+          },
+        },
+        properties: { value: { $ref: '#/$defs/Money' } },
+      },
+    };
+    const changes = diffTools(inline, narrowed);
+
+    expect(codes(changes)).toEqual(['constraint-added']);
+    expect(changes[0]?.path).toBe('inputSchema.properties.value.properties.cents.minimum');
+  });
+
+  it('matches a rename across an inline/`$ref` refactor', () => {
+    const renamed: CanonicalTool = { ...referenced, name: 'demo_tool_v2' };
+    const changes = diffToolSets([inline], [renamed]).changes;
+
+    expect(codes(changes)).toEqual(['tool-renamed']);
+  });
+
+  it('compares a sibling keyword through the reference', () => {
+    const described: CanonicalTool = {
+      name: 'demo_tool',
+      inputSchema: {
+        type: 'object',
+        $defs: {
+          Money: { type: 'object', properties: { cents: { type: 'integer' } }, required: ['cents'] },
+        },
+        properties: { value: { $ref: '#/$defs/Money', description: 'How much' } },
+      },
+    };
+
+    expect(codes(diffTools(inline, described))).toEqual(['description-changed']);
+  });
+});
+
+describe('diffTools — references that could not be resolved', () => {
+  function refTool(property: JsonSchema): CanonicalTool {
+    return { name: 'demo_tool', inputSchema: { type: 'object', properties: { value: property } } };
+  }
+
+  it('reports a changed unresolvable reference as breaking', () => {
+    const changes = diffTools(
+      refTool({ $ref: 'https://example.com/a.json' }),
+      refTool({ $ref: 'https://example.com/b.json' }),
+    );
+
+    expect(codes(changes)).toEqual(['ref-changed']);
+    expect(changes[0]?.classification).toBe('breaking');
+    expect(changes[0]?.path).toBe('inputSchema.properties.value.$ref');
+  });
+
+  it('reports an unresolvable reference replacing an inline schema as breaking', () => {
+    const changes = diffTools(refTool({ type: 'string' }), refTool({ $ref: '#/$defs/Nope' }));
+
+    expect(codes(changes)).toContain('ref-added');
+    expect(find(changes, 'ref-added')?.classification).toBe('breaking');
+  });
+
+  it('reports an unresolvable reference being replaced as breaking', () => {
+    expect(codes(diffTools(refTool({ $ref: '#/$defs/Nope' }), refTool({ type: 'string' })))).toContain(
+      'ref-removed',
+    );
+  });
+
+  it('reports nothing when the same recursive reference is on both sides', () => {
+    expect(diffTools(recursiveTool, recursiveTool)).toEqual([]);
+  });
+
+  it('reports the change when a recursive definition is edited', () => {
+    const edited: CanonicalTool = {
+      ...recursiveTool,
+      inputSchema: {
+        ...recursiveTool.inputSchema,
+        $defs: {
+          Node: {
+            type: 'object',
+            properties: {
+              label: { type: 'string' },
+              children: { type: 'array', items: { $ref: '#/$defs/Node' } },
+            },
+            required: ['label', 'children'],
+          },
+        },
+      },
+    };
+
+    // The use site is an opaque `$ref` on both sides, so the edit surfaces at
+    // the definition instead: a recursive schema is compared where it is
+    // declared, because it cannot be compared where it is used.
+    const changes = diffTools(recursiveTool, edited);
+
+    expect(codes(changes)).toEqual(['property-made-required']);
+    expect(changes[0]?.path).toBe('inputSchema.$defs.Node.required');
   });
 });
