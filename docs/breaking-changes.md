@@ -13,6 +13,9 @@ It does not attempt general JSON Schema subsumption. When a change cannot be
 classified with confidence, it is reported as **breaking** — a false "safe" is
 the expensive mistake.
 
+Both sides are `$ref`-resolved before anything is compared, so a change to how
+the schema is *written* is never mistaken for a change to what it *accepts*.
+
 ## Classifications
 
 - **breaking** — existing callers or existing valid arguments will stop working.
@@ -101,6 +104,40 @@ turning on is breaking; turning off is not.
 Nested objects and array `items` are compared recursively, so
 `inputSchema.properties.history.items.properties.note.type` is reported at full
 depth.
+
+## Reference rules
+
+Because both sides are resolved first, pulling a repeated subschema out into
+`$defs` and pointing at it with `$ref` — or inlining one that was there — is
+correctly reported as **no change**. A real edit made behind a reference is
+still reported, at the full path of the use site:
+
+```
+inputSchema.properties.value.properties.cents.minimum
+```
+
+Rename detection resolves too, so an inline/`$ref` refactor made at the same
+time as a rename is still recognised as one tool under a new name.
+
+A reference that could not be resolved is compared as a reference, because there
+is nothing behind it to compare:
+
+| Code | Class | Trigger |
+|---|---|---|
+| `ref-changed` | breaking | An unresolvable `$ref` now points somewhere else |
+| `ref-added` | breaking | An unresolvable `$ref` replaced an inline schema |
+| `ref-removed` | breaking | An inline schema replaced an unresolvable `$ref` |
+
+All three are breaking for the same reason: a change across an opaque reference
+cannot be proven safe.
+
+Definition maps survive resolution only when something referencing them could
+not be inlined — in practice, a recursive schema. Definitions present on **both**
+sides are then compared under `inputSchema.$defs.<Name>`, so editing a recursive
+definition is reported even though its use site is an opaque `$ref` on both
+sides. A definition that appeared or vanished is not itself reported: if
+anything still points at it, that surfaces as a dangling reference, and if
+nothing does, it was never part of the tool's surface.
 
 ## Composition rules
 
