@@ -365,56 +365,78 @@ function diffArray(before: JsonSchema, after: JsonSchema, path: string, context:
 
 /* --- objects -------------------------------------------------------------- */
 
+/** The `properties` map of an object schema; values are subschemas. */
+type PropertyMap = Readonly<Record<string, unknown>>;
+
 function diffObject(before: JsonSchema, after: JsonSchema, path: string, context: DiffContext): void {
   const oldProperties = isPlainObject(before.properties) ? before.properties : undefined;
   const newProperties = isPlainObject(after.properties) ? after.properties : undefined;
-  const oldRequired = new Set(Array.isArray(before.required) ? before.required : []);
-  const newRequired = new Set(Array.isArray(after.required) ? after.required : []);
 
   if (oldProperties || newProperties) {
-    const oldKeys = Object.keys(oldProperties ?? {});
-    const newKeys = Object.keys(newProperties ?? {});
-
-    for (const key of oldKeys) {
-      if (newKeys.includes(key)) continue;
-      record(context, 'breaking', 'property-removed', joinPath(path, 'properties', key),
-        `Property \`${key}\` was removed.`, (oldProperties ?? {})[key]);
-    }
-
-    for (const key of newKeys) {
-      if (oldKeys.includes(key)) continue;
-      const propertyPath = joinPath(path, 'properties', key);
-      if (newRequired.has(key)) {
-        record(context, 'breaking', 'required-property-added', propertyPath,
-          `Required property \`${key}\` was added. Existing callers do not send it.`,
-          undefined, (newProperties ?? {})[key]);
-      } else {
-        record(context, 'non-breaking', 'optional-property-added', propertyPath,
-          `Optional property \`${key}\` was added.`, undefined, (newProperties ?? {})[key]);
-      }
-    }
-
-    for (const key of oldKeys) {
-      if (!newKeys.includes(key)) continue;
-      const oldChild = asSchema((oldProperties ?? {})[key]);
-      const newChild = asSchema((newProperties ?? {})[key]);
-      if (oldChild && newChild) {
-        diffSchema(oldChild, newChild, joinPath(path, 'properties', key), context);
-      }
-
-      const wasRequired = oldRequired.has(key);
-      const isRequired = newRequired.has(key);
-      if (!wasRequired && isRequired) {
-        record(context, 'breaking', 'property-made-required', joinPath(path, 'required'),
-          `Optional property \`${key}\` is now required.`, false, true);
-      } else if (wasRequired && !isRequired) {
-        record(context, 'non-breaking', 'property-made-optional', joinPath(path, 'required'),
-          `Required property \`${key}\` is now optional.`, true, false);
-      }
-    }
+    diffProperties(
+      { properties: oldProperties ?? {}, required: requiredNames(before) },
+      { properties: newProperties ?? {}, required: requiredNames(after) },
+      path,
+      context,
+    );
   }
 
   diffAdditionalProperties(before, after, path, context);
+}
+
+interface ObjectSide {
+  properties: PropertyMap;
+  required: ReadonlySet<string>;
+}
+
+function requiredNames(schema: JsonSchema): ReadonlySet<string> {
+  return new Set(Array.isArray(schema.required) ? schema.required : []);
+}
+
+function diffProperties(before: ObjectSide, after: ObjectSide, path: string, context: DiffContext): void {
+  const oldKeys = Object.keys(before.properties);
+  const newKeys = Object.keys(after.properties);
+  // Membership is checked once per key in three passes; sets keep that linear.
+  const oldKeySet = new Set(oldKeys);
+  const newKeySet = new Set(newKeys);
+
+  for (const key of oldKeys) {
+    if (newKeySet.has(key)) continue;
+    record(context, 'breaking', 'property-removed', joinPath(path, 'properties', key),
+      `Property \`${key}\` was removed.`, before.properties[key]);
+  }
+
+  for (const key of newKeys) {
+    if (oldKeySet.has(key)) continue;
+    const propertyPath = joinPath(path, 'properties', key);
+    if (after.required.has(key)) {
+      record(context, 'breaking', 'required-property-added', propertyPath,
+        `Required property \`${key}\` was added. Existing callers do not send it.`,
+        undefined, after.properties[key]);
+    } else {
+      record(context, 'non-breaking', 'optional-property-added', propertyPath,
+        `Optional property \`${key}\` was added.`, undefined, after.properties[key]);
+    }
+  }
+
+  for (const key of oldKeys) {
+    if (!newKeySet.has(key)) continue;
+    const oldChild = asSchema(before.properties[key]);
+    const newChild = asSchema(after.properties[key]);
+    if (oldChild && newChild) {
+      diffSchema(oldChild, newChild, joinPath(path, 'properties', key), context);
+    }
+
+    const wasRequired = before.required.has(key);
+    const isRequired = after.required.has(key);
+    if (!wasRequired && isRequired) {
+      record(context, 'breaking', 'property-made-required', joinPath(path, 'required'),
+        `Optional property \`${key}\` is now required.`, false, true);
+    } else if (wasRequired && !isRequired) {
+      record(context, 'non-breaking', 'property-made-optional', joinPath(path, 'required'),
+        `Required property \`${key}\` is now optional.`, true, false);
+    }
+  }
 }
 
 function diffAdditionalProperties(
