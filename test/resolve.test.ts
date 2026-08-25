@@ -504,3 +504,43 @@ describe('resolveToolRefs', () => {
     expect(tool.inputSchema).toEqual(refundOrderTool.inputSchema);
   });
 });
+
+describe('resolveSchemaRefs — refRoot', () => {
+  const document: JsonSchema = {
+    type: 'object',
+    $defs: { Money: { type: 'number', minimum: 0 } },
+    properties: { total: { $ref: '#/$defs/Money' } },
+  };
+
+  it('resolves a fragment against the document it came from', () => {
+    const fragment = (document.properties as Record<string, JsonSchema>)['total'] as JsonSchema;
+    const { schema, issues } = resolveSchemaRefs(fragment, { refRoot: document });
+
+    expect(issues).toEqual([]);
+    expect(schema).toEqual({ type: 'number', minimum: 0 });
+  });
+
+  it('reports the fragment as dangling without it, rather than guessing', () => {
+    const fragment = (document.properties as Record<string, JsonSchema>)['total'] as JsonSchema;
+
+    expect(resolveSchemaRefs(fragment).issues.map((issue) => issue.code)).toEqual(['dangling-ref']);
+  });
+
+  it('detects recursion through the document root', () => {
+    const recursive: JsonSchema = {
+      type: 'object',
+      $defs: { Node: { type: 'object', properties: { next: { $ref: '#/$defs/Node' } } } },
+      properties: { root: { $ref: '#/$defs/Node' } },
+    };
+    const fragment = (recursive.properties as Record<string, JsonSchema>)['root'] as JsonSchema;
+    const { issues } = resolveSchemaRefs(fragment, { refRoot: recursive });
+
+    expect(issues.map((issue) => issue.code)).toEqual(['recursive-ref']);
+  });
+
+  it('never returns anything from `refRoot` that the fragment did not reference', () => {
+    const fragment: JsonSchema = { type: 'object', properties: { a: { type: 'string' } } };
+
+    expect(resolveSchemaRefs(fragment, { refRoot: document }).schema).toEqual(fragment);
+  });
+});

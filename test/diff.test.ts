@@ -457,3 +457,20 @@ describe('diffTools — references that could not be resolved', () => {
     expect(changes[0]?.path).toBe('inputSchema.$defs.Node.required');
   });
 });
+
+describe('diffTools — nested definitions', () => {
+  it('terminates on a definition that nests a definition of the same name', () => {
+    const nest = (type: string): CanonicalTool => ({
+      name: 'demo_tool',
+      inputSchema: {
+        type: 'object',
+        $defs: { A: { $defs: { A: { type } } } },
+        properties: { value: { $ref: '#/$defs/Missing' } },
+      },
+    });
+
+    expect(codes(diffTools(nest('string'), nest('string')))).toEqual([]);
+    const changes = diffTools(nest('string'), nest('number'));
+    expect(changes[0]?.path).toBe('inputSchema.$defs.A.$defs.A.type');
+  });
+});

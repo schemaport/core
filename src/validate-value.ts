@@ -2,6 +2,17 @@ import type { JsonSchema } from './types.js';
 import { asSchema, isPlainObject, schemaTypes } from './schema.js';
 import { hasRefs, resolveSchemaRefs } from './resolve.js';
 
+export interface ValueValidationOptions {
+  /**
+   * Document that `$ref` pointers resolve against. Defaults to `schema`.
+   *
+   * Pass the whole `inputSchema` when validating against a fragment of it, so
+   * that a pointer into the document's `$defs` is followed rather than
+   * reported as dangling.
+   */
+  refRoot?: JsonSchema;
+}
+
 export interface ValueValidationResult {
   valid: boolean;
   /** Human-readable messages, one per failed constraint, sorted for determinism. */
@@ -22,10 +33,16 @@ export interface ValueValidationResult {
  *  - `not`, `if`/`then`/`else`, and `dependentSchemas` are ignored.
  *  - `format` is not enforced.
  */
-export function validateValue(schema: JsonSchema, value: unknown, path = '$'): ValueValidationResult {
-  if (!hasRefs(schema)) return runValidation(schema, value, path, EMPTY_REASONS);
+export function validateValue(
+  schema: JsonSchema,
+  value: unknown,
+  path = '$',
+  options: ValueValidationOptions = {},
+): ValueValidationResult {
+  const refRoot = options.refRoot ?? schema;
+  if (!hasRefs(schema) && !hasRefs(refRoot)) return runValidation(schema, value, path, EMPTY_REASONS);
 
-  const resolved = resolveSchemaRefs(schema);
+  const resolved = resolveSchemaRefs(schema, { refRoot });
   const reasons = new Map<string, string>();
   for (const issue of resolved.issues) {
     if (!reasons.has(issue.pointer)) reasons.set(issue.pointer, issue.message);

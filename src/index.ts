@@ -77,7 +77,7 @@ export { finalizeCompile, isLossy, transformation } from './compile.js';
 export type { FinalizeCompileInput } from './compile.js';
 
 export { validateValue } from './validate-value.js';
-export type { ValueValidationResult } from './validate-value.js';
+export type { ValueValidationOptions, ValueValidationResult } from './validate-value.js';
 
 export {
   classifyProviderError,

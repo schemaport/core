@@ -258,3 +258,26 @@ describe('validateValue — references', () => {
     expect(JSON.stringify(schema)).toBe(before);
   });
 });
+
+describe('validateValue — refRoot', () => {
+  const document: JsonSchema = {
+    type: 'object',
+    $defs: { Money: { type: 'integer', minimum: 0 } },
+    properties: { total: { $ref: '#/$defs/Money' } },
+  };
+  const fragment = (document.properties as Record<string, JsonSchema>)['total'] as JsonSchema;
+
+  it('validates a fragment against the document it came from', () => {
+    expect(validateValue(fragment, 5, '$.total', { refRoot: document }).valid).toBe(true);
+    expect(validateValue(fragment, -1, '$.total', { refRoot: document }).errors[0]).toContain(
+      'below minimum 0',
+    );
+  });
+
+  it('reports the reference as unresolved without it, rather than passing', () => {
+    const result = validateValue(fragment, -1, '$.total');
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('could not resolve');
+  });
+});

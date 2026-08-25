@@ -57,7 +57,12 @@ export interface ResolvedSchema {
   schema: JsonSchema;
   /** One entry per `$ref` left in place, sorted by path. */
   issues: RefResolutionIssue[];
-  /** How many `$ref` keywords were replaced by their target. */
+  /**
+   * How many expansions were performed.
+   *
+   * One per `$ref` followed, so a chain of two references resolving a single
+   * use site counts 2. Zero means nothing was inlined.
+   */
   resolvedCount: number;
 }
 
@@ -79,6 +84,14 @@ export interface ResolveOptions {
    * that an inlined schema and its `$ref` form compare as equal.
    */
   keepDefinitions?: boolean;
+  /**
+   * Document that `$ref` pointers resolve against. Defaults to `schema`.
+   *
+   * Pass the whole document when resolving a fragment of one, so that a
+   * pointer into the document's `$defs` is followed rather than reported as
+   * dangling. Only `schema` is rewritten; `refRoot` is read, never returned.
+   */
+  refRoot?: JsonSchema;
 }
 
 /** Keyword slots holding a map of subschemas. Definition maps are not among them. */
@@ -134,14 +147,15 @@ const ANNOTATION_KEYWORDS = new Set([
 export function resolveSchemaRefs(schema: JsonSchema, options: ResolveOptions = {}): ResolvedSchema {
   const rootPath = options.rootPath ?? 'inputSchema';
   const maxDepth = options.maxDepth ?? MAX_REF_DEPTH;
+  const root = options.refRoot ?? schema;
 
   const state: ResolveState = {
-    root: schema,
+    root,
     maxDepth,
     issues: [],
     resolvedCount: 0,
     unresolvedCount: 0,
-    recursion: findRecursiveRefs(schema),
+    recursion: findRecursiveRefs(root, refsWithin(schema)),
   };
 
   let resolved = resolveNode(schema, rootPath, [], state);
@@ -392,8 +406,14 @@ function mergeSiblings(expanded: JsonSchema, siblings: JsonSchema): JsonSchema {
  * left exactly as written instead of expanded once and then abandoned. Each
  * entry maps the pointer to the cycle that condemns it, so the reported
  * message can name the loop rather than just asserting one exists.
+ *
+ * `seed` is the set of references the document actually uses; the graph is
+ * explored from there, so a definition nothing points at is never examined.
  */
-function findRecursiveRefs(root: JsonSchema): Map<string, readonly string[]> {
+function findRecursiveRefs(
+  root: JsonSchema,
+  seed: readonly string[],
+): Map<string, readonly string[]> {
   const unsafe = new Map<string, readonly string[]>();
   const settled = new Set<string>();
   const trail: string[] = [];
@@ -427,7 +447,7 @@ function findRecursiveRefs(root: JsonSchema): Map<string, readonly string[]> {
     return unsafe.get(pointer);
   }
 
-  for (const pointer of refsWithin(root)) visit(pointer);
+  for (const pointer of seed) visit(pointer);
   return unsafe;
 }
 

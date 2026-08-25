@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `#`, and RFC 6901 escaping (`~1` to `/`, `~0` to `~`) with percent-decoding. A
   reference to a reference is followed through, up to `MAX_REF_DEPTH` (64).
   `resolveToolRefs(tool, options?)` does the same for a canonical tool, and
-  `hasRefs(schema)` answers whether there is any work to do. Resolution is
+  `hasRefs(schema)` answers whether there is any work to do. Pass `refRoot` to
+  resolve a fragment against the document it came from. Resolution is
   deterministic and never mutates its input.
 - **`lookupRef(root, ref)`** resolves one pointer and classifies the failure —
   `external`, `anchor`, `malformed`, `missing` or `not-a-schema` — so adapters
@@ -34,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`validateValue` resolves before validating.** A constraint that only exists
   behind a `$ref` is now genuinely enforced. A reference that cannot be
   resolved still reports the value as unverified — now naming the pointer and
-  the reason, and still checking everything around it.
+  the reason, and still checking everything around it. A fourth argument takes
+  `refRoot`, for validating against a fragment of a larger document.
 - **`validateCanonicalTool` rejects a reference nothing can follow.** External
   references, dangling pointers and malformed ones are structural errors, so
   `loadTools` refuses the file. Recursive references, `$anchor` fragments and

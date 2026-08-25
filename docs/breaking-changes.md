@@ -131,11 +131,12 @@ is nothing behind it to compare:
 All three are breaking for the same reason: a change across an opaque reference
 cannot be proven safe.
 
-Definition maps survive resolution only when something referencing them could
-not be inlined — in practice, a recursive schema. Definitions present on **both**
-sides are then compared under `inputSchema.$defs.<Name>`, so editing a recursive
-definition is reported even though its use site is an opaque `$ref` on both
-sides. A definition that appeared or vanished is not itself reported: if
+Definition maps are also compared. The root map survives resolution only when
+something referencing it could not be inlined — in practice, a recursive
+schema — and a map on a nested subschema is never dropped at all. Definitions
+present on **both** sides are compared under `<path>.$defs.<Name>`, so editing a
+recursive definition is reported even though its use site is an opaque `$ref` on
+both sides. A definition that appeared or vanished is not itself reported: if
 anything still points at it, that surfaces as a dangling reference, and if
 nothing does, it was never part of the tool's surface.
 
