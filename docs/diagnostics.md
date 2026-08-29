@@ -88,9 +88,39 @@ a constraint and then ignored it.
 
 It implements the supported subset only, and is explicit about its gaps:
 
-- **`$ref` is not resolved.** A schema containing `$ref` reports that the value
-  could not be verified — it never silently passes.
+- **Same-document `$ref` is resolved first**, so a constraint that only exists
+  behind a reference is genuinely checked. A reference that cannot be
+  resolved — external, dangling, recursive — reports that the value could not
+  be verified, and says why. It never silently passes.
 - `not`, `if`/`then`/`else` and `dependentSchemas` are ignored.
 - `format` is not enforced (providers treat it as advisory).
 
+```
+$.total.cents: -1 is below minimum 0.
+$.root: contains `$ref` `#/$defs/Node`, which SchemaPort could not resolve;
+        value not verified. `#/$defs/Node` is recursive (#/$defs/Node -> #/$defs/Node).
+```
+
+Everything around an unresolvable reference is still checked — one opaque
+pointer does not make the whole value unverifiable.
+
 Errors are returned sorted, so results are deterministic.
+
+## Reference resolution issues
+
+`resolveSchemaRefs` reports its own issues, separately from `Diagnostic`. They
+are not provider-specific and carry no `CompileAbility`, because nothing about
+them depends on a target:
+
+```ts
+interface RefResolutionIssue {
+  code: RefIssueCode; // 'dangling-ref'
+  pointer: string;    // '#/$defs/Money'
+  path: string;       // 'inputSchema.properties.total.$ref'
+  message: string;
+}
+```
+
+The codes are listed in
+[the canonical tool format](canonical-tool-format.md#what-does-not-resolve).
+Issues are sorted by path, then pointer, then code.

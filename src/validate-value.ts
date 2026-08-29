@@ -1,5 +1,17 @@
 import type { JsonSchema } from './types.js';
 import { asSchema, isPlainObject, schemaTypes } from './schema.js';
+import { hasRefs, resolveSchemaRefs } from './resolve.js';
+
+export interface ValueValidationOptions {
+  /**
+   * Document that `$ref` pointers resolve against. Defaults to `schema`.
+   *
+   * Pass the whole `inputSchema` when validating against a fragment of it, so
+   * that a pointer into the document's `$defs` is followed rather than
+   * reported as dangling.
+   */
+  refRoot?: JsonSchema;
+}
 
 export interface ValueValidationResult {
   valid: boolean;
@@ -14,21 +26,67 @@ export interface ValueValidationResult {
  * the canonical shape?" without pulling in a full validator. It is deliberately
  * small and its limitations are documented in `docs/diagnostics.md`:
  *
- *  - `$ref` is not resolved. A schema containing `$ref` is reported as
- *    unverifiable rather than silently passing.
+ *  - Same-document `$ref` is resolved first, so a reference is validated
+ *    through. A reference that cannot be resolved — external, dangling or
+ *    recursive — is reported as unverifiable, with the reason, rather than
+ *    silently passing.
  *  - `not`, `if`/`then`/`else`, and `dependentSchemas` are ignored.
  *  - `format` is not enforced.
  */
-export function validateValue(schema: JsonSchema, value: unknown, path = '$'): ValueValidationResult {
+export function validateValue(
+  schema: JsonSchema,
+  value: unknown,
+  path = '$',
+  options: ValueValidationOptions = {},
+): ValueValidationResult {
+  const refRoot = options.refRoot ?? schema;
+  if (!hasRefs(schema) && !hasRefs(refRoot)) return runValidation(schema, value, path, EMPTY_REASONS);
+
+  const resolved = resolveSchemaRefs(schema, { refRoot });
+  const reasons = new Map<string, string>();
+  for (const issue of resolved.issues) {
+    if (!reasons.has(issue.pointer)) reasons.set(issue.pointer, issue.message);
+  }
+  return runValidation(resolved.schema, value, path, reasons);
+}
+
+/** Reasons a `$ref` was left unresolved, keyed by the pointer itself. */
+type RefReasons = ReadonlyMap<string, string>;
+
+const EMPTY_REASONS: RefReasons = new Map();
+
+function runValidation(
+  schema: JsonSchema,
+  value: unknown,
+  path: string,
+  reasons: RefReasons,
+): ValueValidationResult {
   const errors: string[] = [];
-  validateInto(schema, value, path, errors);
+  validateInto(schema, value, path, { errors, reasons });
   errors.sort();
   return { valid: errors.length === 0, errors };
 }
 
-function validateInto(schema: JsonSchema, value: unknown, path: string, errors: string[]): void {
+/** Carried through validation so an unresolved `$ref` can state why it is one. */
+interface ValidationContext {
+  errors: string[];
+  reasons: RefReasons;
+}
+
+function validateInto(
+  schema: JsonSchema,
+  value: unknown,
+  path: string,
+  context: ValidationContext,
+): void {
+  const { errors } = context;
+
   if (typeof schema.$ref === 'string') {
-    errors.push(`${path}: contains \`$ref\`, which SchemaPort does not resolve; value not verified.`);
+    const reason = context.reasons.get(schema.$ref);
+    errors.push(
+      `${path}: contains \`$ref\` \`${schema.$ref}\`, which SchemaPort could not resolve; value not verified.` +
+        (reason === undefined ? '' : ` ${reason}`),
+    );
     return;
   }
 
@@ -48,20 +106,20 @@ function validateInto(schema: JsonSchema, value: unknown, path: string, errors: 
 
   if (typeof value === 'number') validateNumber(schema, value, path, errors);
   if (typeof value === 'string') validateString(schema, value, path, errors);
-  if (Array.isArray(value)) validateArray(schema, value, path, errors);
-  if (isPlainObject(value)) validateObject(schema, value, path, errors);
+  if (Array.isArray(value)) validateArray(schema, value, path, context);
+  if (isPlainObject(value)) validateObject(schema, value, path, context);
 
   if (Array.isArray(schema.allOf)) {
     for (const branch of schema.allOf) {
       const sub = asSchema(branch);
-      if (sub) validateInto(sub, value, path, errors);
+      if (sub) validateInto(sub, value, path, context);
     }
   }
 
   if (Array.isArray(schema.anyOf) && schema.anyOf.length > 0) {
     const matched = schema.anyOf.some((branch) => {
       const sub = asSchema(branch);
-      return sub ? validateValue(sub, value, path).valid : false;
+      return sub ? runValidation(sub, value, path, context.reasons).valid : false;
     });
     if (!matched) errors.push(`${path}: value does not match any \`anyOf\` branch.`);
   }
@@ -69,7 +127,7 @@ function validateInto(schema: JsonSchema, value: unknown, path: string, errors: 
   if (Array.isArray(schema.oneOf) && schema.oneOf.length > 0) {
     const matches = schema.oneOf.filter((branch) => {
       const sub = asSchema(branch);
-      return sub ? validateValue(sub, value, path).valid : false;
+      return sub ? runValidation(sub, value, path, context.reasons).valid : false;
     }).length;
     if (matches !== 1) {
       errors.push(`${path}: value matched ${matches} \`oneOf\` branches, expected exactly 1.`);
@@ -119,7 +177,13 @@ function validateString(schema: JsonSchema, value: string, path: string, errors:
   }
 }
 
-function validateArray(schema: JsonSchema, value: unknown[], path: string, errors: string[]): void {
+function validateArray(
+  schema: JsonSchema,
+  value: unknown[],
+  path: string,
+  context: ValidationContext,
+): void {
+  const { errors } = context;
   if (typeof schema.minItems === 'number' && value.length < schema.minItems) {
     errors.push(`${path}: array has fewer than minItems ${schema.minItems}.`);
   }
@@ -132,7 +196,7 @@ function validateArray(schema: JsonSchema, value: unknown[], path: string, error
   }
   const items = asSchema(schema.items);
   if (items) {
-    value.forEach((item, index) => validateInto(items, item, `${path}[${index}]`, errors));
+    value.forEach((item, index) => validateInto(items, item, `${path}[${index}]`, context));
   }
 }
 
@@ -140,8 +204,9 @@ function validateObject(
   schema: JsonSchema,
   value: Record<string, unknown>,
   path: string,
-  errors: string[],
+  context: ValidationContext,
 ): void {
+  const { errors } = context;
   const properties = isPlainObject(schema.properties) ? schema.properties : {};
 
   if (Array.isArray(schema.required)) {
@@ -162,7 +227,7 @@ function validateObject(
   for (const [key, raw] of Object.entries(value)) {
     const child = asSchema((properties as Record<string, unknown>)[key]);
     if (child) {
-      validateInto(child, raw, `${path}.${key}`, errors);
+      validateInto(child, raw, `${path}.${key}`, context);
       continue;
     }
     if (schema.additionalProperties === false) {
@@ -170,7 +235,7 @@ function validateObject(
       continue;
     }
     const additional = asSchema(schema.additionalProperties);
-    if (additional) validateInto(additional, raw, `${path}.${key}`, errors);
+    if (additional) validateInto(additional, raw, `${path}.${key}`, context);
   }
 }
 

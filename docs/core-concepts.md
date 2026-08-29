@@ -57,7 +57,10 @@ Compiled output is derived, never authoritative. That has three consequences
 worth knowing:
 
 - **Diff compares canonical schemas**, not compiled ones. A provider-specific
-  representation change is not a change to your contract.
+  representation change is not a change to your contract. Both sides are
+  `$ref`-resolved first, so neither is a change in how the canonical schema is
+  written: swapping an inline subschema for an equivalent reference is no
+  change at all.
 - **Probe validates returned arguments against the canonical schema**, not the
   compiled one. A provider that accepted `minimum: 0` and then produced `-50`
   shows up as accepted-but-wrong-shape instead of a clean pass.
@@ -82,6 +85,13 @@ Three rules run through the whole product:
    it is uncertain, never a clean pass.
 3. **No fabricated results.** A missing API key, a stale model id and a network
    failure are reported as environment errors — never as a schema rejection.
+
+Reference resolution is the clearest case of the third rule. Same-document
+`$ref` is resolved, so a constraint behind a reference is genuinely enforced —
+but a recursive schema has no finite inlining, so SchemaPort detects the cycle,
+names it, and leaves the reference alone rather than emitting a half-expanded
+schema that would look verified. See
+[the canonical tool format](canonical-tool-format.md#references).
 
 ## Where things live
 

@@ -32,6 +32,7 @@ export type {
 } from './types.js';
 
 export {
+  MAX_REF_DEPTH,
   asSchema,
   cloneSchema,
   collectSchemas,
@@ -40,11 +41,20 @@ export {
   isPlainObject,
   isType,
   joinPath,
+  lookupRef,
   schemaTypes,
   stableStringify,
   walkSchema,
 } from './schema.js';
-export type { SchemaVisit } from './schema.js';
+export type { RefLookup, SchemaVisit, WalkOptions } from './schema.js';
+
+export { hasRefs, resolveSchemaRefs, resolveToolRefs } from './resolve.js';
+export type {
+  RefIssueCode,
+  RefResolutionIssue,
+  ResolveOptions,
+  ResolvedSchema,
+} from './resolve.js';
 
 export { displayPath, loadTools, toolFileBaseName } from './load.js';
 export type { LoadOptions } from './load.js';
@@ -67,7 +77,7 @@ export { finalizeCompile, isLossy, transformation } from './compile.js';
 export type { FinalizeCompileInput } from './compile.js';
 
 export { validateValue } from './validate-value.js';
-export type { ValueValidationResult } from './validate-value.js';
+export type { ValueValidationOptions, ValueValidationResult } from './validate-value.js';
 
 export {
   classifyProviderError,
@@ -89,10 +99,15 @@ export { diffToolSets, diffTools, summarizeChanges } from './diff.js';
 export {
   FIXTURE_TOOLS,
   INVALID_TOOL_VALUES,
+  REF_FIXTURE_TOOLS,
   constraintTool,
+  danglingRefTool,
+  externalRefTool,
   minimalTool,
   nestedTool,
   openMapTool,
+  recursiveTool,
+  refDefsTool,
   refundOrderTool,
   unionTool,
 } from './fixtures.js';

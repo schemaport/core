@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { JsonSchema } from '../src/types.js';
 import { validateValue } from '../src/validate-value.js';
-import { constraintTool, nestedTool, refundOrderTool } from '../src/fixtures.js';
+import {
+  constraintTool,
+  externalRefTool,
+  nestedTool,
+  recursiveTool,
+  refundOrderTool,
+} from '../src/fixtures.js';
 
 describe('validateValue', () => {
   it('accepts a value satisfying the canonical schema', () => {
@@ -128,12 +134,13 @@ describe('validateValue', () => {
     expect(validateValue(schema, { a: null }).valid).toBe(true);
   });
 
-  it('reports a $ref as unverified rather than silently passing', () => {
+  it('reports a $ref it cannot resolve as unverified rather than silently passing', () => {
     const schema: JsonSchema = { $ref: '#/$defs/thing' };
     const result = validateValue(schema, { anything: true });
 
     expect(result.valid).toBe(false);
-    expect(result.errors[0]).toContain('does not resolve');
+    expect(result.errors[0]).toContain('could not resolve');
+    expect(result.errors[0]).toContain('#/$defs/thing');
   });
 
   it('produces sorted, deterministic error lists', () => {
@@ -143,5 +150,134 @@ describe('validateValue', () => {
 
     expect(first.errors).toEqual(second.errors);
     expect(first.errors).toEqual([...first.errors].sort());
+  });
+});
+
+describe('validateValue — references', () => {
+  const schema: JsonSchema = {
+    type: 'object',
+    $defs: {
+      Money: {
+        type: 'object',
+        properties: { cents: { type: 'integer', minimum: 0 } },
+        required: ['cents'],
+      },
+    },
+    properties: { total: { $ref: '#/$defs/Money' } },
+    required: ['total'],
+  };
+
+  it('validates through a resolvable reference', () => {
+    expect(validateValue(schema, { total: { cents: 5 } }).valid).toBe(true);
+  });
+
+  it('enforces a constraint that only exists behind a reference', () => {
+    const result = validateValue(schema, { total: { cents: -1 } });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('below minimum 0');
+    expect(result.errors[0]).toContain('$.total.cents');
+  });
+
+  it('enforces a required property that only exists behind a reference', () => {
+    expect(validateValue(schema, { total: {} }).errors[0]).toContain('missing required property');
+  });
+
+  it('applies a sibling keyword alongside the reference', () => {
+    const withSibling: JsonSchema = {
+      type: 'object',
+      $defs: { Name: { type: 'string' } },
+      properties: { value: { $ref: '#/$defs/Name', minLength: 4 } },
+    };
+
+    expect(validateValue(withSibling, { value: 'abcd' }).valid).toBe(true);
+    expect(validateValue(withSibling, { value: 'abc' }).errors[0]).toContain('minLength 4');
+  });
+
+  it('applies both sides when a sibling and its target constrain the same keyword', () => {
+    const conflicting: JsonSchema = {
+      type: 'object',
+      $defs: { Name: { type: 'string', minLength: 5 } },
+      properties: { value: { $ref: '#/$defs/Name', minLength: 3 } },
+    };
+
+    expect(validateValue(conflicting, { value: 'abcde' }).valid).toBe(true);
+    expect(validateValue(conflicting, { value: 'abcd' }).errors[0]).toContain('minLength 5');
+  });
+
+  it('validates through a reference inside `items`', () => {
+    const arrays: JsonSchema = {
+      type: 'object',
+      $defs: { Id: { type: 'string', pattern: '^id_' } },
+      properties: { ids: { type: 'array', items: { $ref: '#/$defs/Id' } } },
+    };
+
+    expect(validateValue(arrays, { ids: ['id_1', 'id_2'] }).valid).toBe(true);
+    expect(validateValue(arrays, { ids: ['nope'] }).errors[0]).toContain('$.ids[0]');
+  });
+
+  it('reports a recursive reference as unverified, with the cycle', () => {
+    const result = validateValue(recursiveTool.inputSchema, { root: { label: 'a' } });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('$.root');
+    expect(result.errors[0]).toContain('is recursive');
+    expect(result.errors[0]).toContain('#/$defs/Node -> #/$defs/Node');
+  });
+
+  it('reports an external reference as unverified, with the reason', () => {
+    const result = validateValue(externalRefTool.inputSchema, { address: { city: 'Lagos' } });
+
+    expect(result.errors[0]).toContain('points outside this document');
+  });
+
+  it('still checks everything around an unresolvable reference', () => {
+    const mixed: JsonSchema = {
+      type: 'object',
+      properties: {
+        known: { type: 'integer' },
+        opaque: { $ref: 'https://example.com/a.json' },
+      },
+    };
+    const result = validateValue(mixed, { known: 'not an integer', opaque: {} });
+
+    expect(result.errors).toHaveLength(2);
+    expect(result.errors.some((error) => error.includes('expected type integer'))).toBe(true);
+  });
+
+  it('is deterministic across repeated runs of a referencing schema', () => {
+    const value = { total: { cents: -1 } };
+
+    expect(validateValue(schema, value).errors).toEqual(validateValue(schema, value).errors);
+  });
+
+  it('does not mutate the schema it validates against', () => {
+    const before = JSON.stringify(schema);
+    validateValue(schema, { total: { cents: 1 } });
+
+    expect(JSON.stringify(schema)).toBe(before);
+  });
+});
+
+describe('validateValue — refRoot', () => {
+  const document: JsonSchema = {
+    type: 'object',
+    $defs: { Money: { type: 'integer', minimum: 0 } },
+    properties: { total: { $ref: '#/$defs/Money' } },
+  };
+  const fragment = (document.properties as Record<string, JsonSchema>)['total'] as JsonSchema;
+
+  it('validates a fragment against the document it came from', () => {
+    expect(validateValue(fragment, 5, '$.total', { refRoot: document }).valid).toBe(true);
+    expect(validateValue(fragment, -1, '$.total', { refRoot: document }).errors[0]).toContain(
+      'below minimum 0',
+    );
+  });
+
+  it('reports the reference as unresolved without it, rather than passing', () => {
+    const result = validateValue(fragment, -1, '$.total');
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('could not resolve');
   });
 });

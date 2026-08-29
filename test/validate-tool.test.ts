@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { isCanonicalTool, validateCanonicalTool } from '../src/validate-tool.js';
-import { FIXTURE_TOOLS, INVALID_TOOL_VALUES } from '../src/fixtures.js';
+import {
+  FIXTURE_TOOLS,
+  INVALID_TOOL_VALUES,
+  danglingRefTool,
+  externalRefTool,
+  recursiveTool,
+  refDefsTool,
+} from '../src/fixtures.js';
 
 describe('validateCanonicalTool', () => {
   it('accepts every shared fixture tool', () => {
@@ -165,5 +172,75 @@ describe('isCanonicalTool', () => {
 
   it('returns false for an invalid tool', () => {
     expect(isCanonicalTool({ name: 'x' })).toBe(false);
+  });
+});
+
+describe('validateCanonicalTool — references', () => {
+  it('accepts a tool whose references all resolve', () => {
+    expect(validateCanonicalTool(refDefsTool)).toEqual([]);
+  });
+
+  it('accepts a recursive tool', () => {
+    // Recursion is not a defect in the document: it is well formed, and some
+    // targets accept it. Core reports that it cannot inline it elsewhere.
+    expect(validateCanonicalTool(recursiveTool)).toEqual([]);
+  });
+
+  it('rejects a dangling internal reference', () => {
+    const issues = validateCanonicalTool(danglingRefTool);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe('inputSchema.properties.coupon.$ref');
+    expect(issues[0]?.message).toContain('does not resolve');
+  });
+
+  it('rejects an external reference', () => {
+    const issues = validateCanonicalTool(externalRefTool);
+
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.path).toBe('inputSchema.properties.address.$ref');
+    expect(issues[0]?.message).toContain('points outside this document');
+  });
+
+  it('rejects a pointer that lands on something that is not a schema', () => {
+    const issues = validateCanonicalTool({
+      name: 'alias_tool',
+      inputSchema: {
+        type: 'object',
+        properties: { id: { type: 'string' }, alias: { $ref: '#/required/0' } },
+        required: ['id'],
+      },
+    });
+
+    expect(issues[0]?.message).toContain('not a schema object');
+  });
+
+  it('accepts an `$anchor` reference rather than calling it malformed', () => {
+    const issues = validateCanonicalTool({
+      name: 'anchor_tool',
+      inputSchema: {
+        type: 'object',
+        $defs: { Money: { $anchor: 'money', type: 'object' } },
+        properties: { total: { $ref: '#money' } },
+      },
+    });
+
+    expect(issues).toEqual([]);
+  });
+
+  it('reports the reference path alongside other structural issues', () => {
+    const issues = validateCanonicalTool({
+      name: 'mixed',
+      inputSchema: {
+        type: 'object',
+        properties: { a: { $ref: '#/$defs/Nope' } },
+        required: ['missing'],
+      },
+    });
+
+    expect(issues.map((issue) => issue.path)).toEqual([
+      'inputSchema.required',
+      'inputSchema.properties.a.$ref',
+    ]);
   });
 });

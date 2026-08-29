@@ -55,6 +55,40 @@ for (const { schema, path } of collectSchemas(tool.inputSchema, 'inputSchema')) 
 
 `check` must be pure: same tool in, same diagnostics out, in the same order.
 
+### References
+
+`collectSchemas` still does **not** follow `$ref` by default, and that will not
+change — a purely syntactic walk is what most rules want. Two opt-ins are
+available when a rule needs to see through a reference:
+
+```ts
+import { collectSchemas, resolveSchemaRefs } from '@schemaport/core';
+
+// Visit reference targets as well, with cycle protection.
+collectSchemas(tool.inputSchema, 'inputSchema', { followRefs: true });
+
+// Or check the inlined schema, and report what could not be inlined.
+const { schema, issues } = resolveSchemaRefs(tool.inputSchema);
+```
+
+Which one you want depends on the target:
+
+- **The target supports `$ref`** — check the schema as written, and add rules
+  for the reference forms it will not accept. `resolveSchemaRefs` issues tell
+  you which references core could not follow either.
+- **The target has no reference support** — inline with `resolveSchemaRefs`
+  before compiling. Inlining a non-recursive reference preserves every
+  constraint, so it is a `lossy: false` transformation. A reference left in
+  `issues` cannot be inlined at all: that is a `notCompilable` error, not a
+  lossy one, and the `RefResolutionIssue` message is written to be quoted
+  straight into the diagnostic.
+
+Core rejects `external-ref`, `dangling-ref` and `invalid-ref` at load, so a tool
+that reaches your adapter will not carry those. It may still carry a recursive
+reference, an `$anchor`, or a chain deeper than `MAX_REF_DEPTH` — those are
+legal schemas core simply does not inline, and each target answers for itself
+whether it accepts them.
+
 Only implement rules you have evidence for. If a target's behaviour is uncertain,
 emit a `warning` that says it is uncertain. Never invent a guarantee, and never
 report a schema as fully compatible when a constraint would be accepted and then
@@ -151,5 +185,21 @@ against the same inputs:
 ```ts
 import { refundOrderTool, nestedTool, openMapTool } from '@schemaport/core';
 ```
+
+Reference fixtures are a separate set, because three of the four are not meant
+to compile and `FIXTURE_TOOLS` is iterated wholesale by several packages:
+
+```ts
+import {
+  REF_FIXTURE_TOOLS, // all four, keyed by name
+  refDefsTool,       // `$defs` + `$ref`, resolves cleanly
+  recursiveTool,     // self-recursive through `$defs`
+  danglingRefTool,   // pointer targets nothing
+  externalRefTool,   // pointer into another document
+} from '@schemaport/core';
+```
+
+`danglingRefTool` and `externalRefTool` are also in `INVALID_TOOL_VALUES`, since
+core refuses to load them.
 
 No test may make a network request.

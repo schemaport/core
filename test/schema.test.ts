@@ -138,3 +138,81 @@ describe('stableStringify', () => {
     expect(stableStringify({ b: 1, a: 2 })).toContain('"b": 1');
   });
 });
+
+describe('walkSchema — followRefs', () => {
+  const schema: JsonSchema = {
+    type: 'object',
+    $defs: { Money: { type: 'object', properties: { cents: { type: 'integer' } } } },
+    properties: { total: { $ref: '#/$defs/Money' } },
+  };
+
+  it('does not follow references by default', () => {
+    const paths = collectSchemas(schema, 'inputSchema').map((entry) => entry.path);
+
+    expect(paths).toEqual([
+      'inputSchema',
+      'inputSchema.properties.total',
+      'inputSchema.$defs.Money',
+      'inputSchema.$defs.Money.properties.cents',
+    ]);
+  });
+
+  it('visits the reference target when asked', () => {
+    const visits = collectSchemas(schema, 'inputSchema', { followRefs: true });
+
+    expect(visits.map((entry) => entry.path)).toEqual([
+      'inputSchema',
+      'inputSchema.properties.total',
+      'inputSchema.properties.total.$ref',
+      'inputSchema.properties.total.$ref.properties.cents',
+      'inputSchema.$defs.Money',
+      'inputSchema.$defs.Money.properties.cents',
+    ]);
+    expect(visits.find((entry) => entry.keyword === '$ref')?.schema).toBe(schema.$defs?.['Money']);
+  });
+
+  it('does not loop on a self-recursive schema', () => {
+    const recursive: JsonSchema = {
+      type: 'object',
+      $defs: { Node: { type: 'object', properties: { next: { $ref: '#/$defs/Node' } } } },
+      properties: { root: { $ref: '#/$defs/Node' } },
+    };
+
+    const paths = collectSchemas(recursive, 'inputSchema', { followRefs: true }).map((e) => e.path);
+
+    expect(paths.length).toBeLessThan(20);
+    expect(paths).toContain('inputSchema.properties.root.$ref.properties.next');
+    // The second hop through `#/$defs/Node` is refused, so the walk terminates.
+    expect(paths).not.toContain('inputSchema.properties.root.$ref.properties.next.$ref');
+  });
+
+  it('does not loop on mutual recursion', () => {
+    const mutual: JsonSchema = {
+      type: 'object',
+      $defs: {
+        A: { type: 'object', properties: { b: { $ref: '#/$defs/B' } } },
+        B: { type: 'object', properties: { a: { $ref: '#/$defs/A' } } },
+      },
+      properties: { start: { $ref: '#/$defs/A' } },
+    };
+
+    expect(collectSchemas(mutual, 'inputSchema', { followRefs: true }).length).toBeLessThan(30);
+  });
+
+  it('skips a reference it cannot resolve', () => {
+    const dangling: JsonSchema = { type: 'object', properties: { x: { $ref: '#/$defs/Nope' } } };
+    const paths = collectSchemas(dangling, 'inputSchema', { followRefs: true }).map((e) => e.path);
+
+    expect(paths).toEqual(['inputSchema', 'inputSchema.properties.x']);
+  });
+
+  it('resolves pointers against `refRoot` when the walk starts partway down', () => {
+    const branch = (schema.properties as Record<string, JsonSchema>)['total'] as JsonSchema;
+    const paths = collectSchemas(branch, 'inputSchema.properties.total', {
+      followRefs: true,
+      refRoot: schema,
+    }).map((entry) => entry.path);
+
+    expect(paths).toContain('inputSchema.properties.total.$ref');
+  });
+});

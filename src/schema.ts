@@ -54,6 +54,78 @@ export function joinPath(base: string, ...segments: (string | number)[]): string
   return path;
 }
 
+/* -------------------------------------------------------------------------- */
+/* JSON Pointer lookup                                                         */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The outcome of looking a `$ref` up against a document root.
+ *
+ * The failure kinds are distinct because they need different advice: an
+ * external reference needs the document inlining, a missing one is a typo, and
+ * an `$anchor` is a form SchemaPort does not index.
+ */
+export type RefLookup =
+  | { kind: 'found'; schema: JsonSchema }
+  /** Not a same-document reference — it does not start with `#`. */
+  | { kind: 'external' }
+  /** A plain-name fragment such as `#money`, which names an `$anchor`. */
+  | { kind: 'anchor' }
+  /** The pointer contains a percent-escape that cannot be decoded. */
+  | { kind: 'malformed' }
+  /** The pointer is well formed but nothing sits at that location. */
+  | { kind: 'missing' }
+  /** Something sits there, but it is not a schema object. */
+  | { kind: 'not-a-schema' };
+
+/**
+ * Resolve a same-document `$ref` to the subschema it names.
+ *
+ * Supports the root pointer (`#`) and RFC 6901 JSON Pointer fragments such as
+ * `#/$defs/Money`, `#/properties/orderId` and `#/anyOf/0`. Segments are
+ * percent-decoded and then unescaped (`~1` before `~0`, as RFC 6901 requires).
+ *
+ * This is a lookup only — it never follows the reference chain and never
+ * detects recursion. {@link resolveSchemaRefs} in `resolve.ts` does both.
+ */
+export function lookupRef(root: JsonSchema, ref: string): RefLookup {
+  if (!ref.startsWith('#')) return { kind: 'external' };
+  if (ref === '#' || ref === '#/') return { kind: 'found', schema: root };
+  if (!ref.startsWith('#/')) return { kind: 'anchor' };
+
+  let current: unknown = root;
+  for (const rawSegment of ref.slice(2).split('/')) {
+    const segment = unescapePointerSegment(rawSegment);
+    if (segment === undefined) return { kind: 'malformed' };
+    if (Array.isArray(current)) {
+      const index = Number(segment);
+      if (!Number.isInteger(index) || index < 0 || index >= current.length) return { kind: 'missing' };
+      current = current[index];
+      continue;
+    }
+    if (!isPlainObject(current) || !(segment in current)) return { kind: 'missing' };
+    current = current[segment];
+  }
+
+  const schema = asSchema(current);
+  return schema ? { kind: 'found', schema } : { kind: 'not-a-schema' };
+}
+
+/**
+ * Percent-decode one pointer segment, then apply the RFC 6901 escapes in the
+ * required order (`~1` before `~0`). Returns `undefined` for a malformed
+ * percent-escape, which makes the pointer unresolvable rather than throwing.
+ */
+function unescapePointerSegment(segment: string): string | undefined {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(segment);
+  } catch {
+    return undefined;
+  }
+  return decoded.replace(/~1/g, '/').replace(/~0/g, '~');
+}
+
 /** One subschema encountered while walking. */
 export interface SchemaVisit {
   schema: JsonSchema;
@@ -71,19 +143,55 @@ const OBJECT_MAP_KEYWORDS = ['properties', '$defs', 'definitions'] as const;
 const ARRAY_KEYWORDS = ['prefixItems', 'anyOf', 'oneOf', 'allOf'] as const;
 const SINGLE_KEYWORDS = ['items', 'not', 'additionalProperties'] as const;
 
+/** How far a walk may follow a chain of `$ref`s before it gives up. */
+export const MAX_REF_DEPTH = 64;
+
+export interface WalkOptions {
+  /**
+   * Also visit the target of every resolvable same-document `$ref`, as an
+   * extra child of the schema that carries the reference, with the keyword
+   * `$ref` and the path `<referring path>.$ref`.
+   *
+   * Off by default: the default walk is purely syntactic, and every existing
+   * caller depends on that. A followed target is visited *in addition to* the
+   * normal traversal, so a `$defs` entry reached from a use site is visited
+   * twice — once as a definition, once as the reference target.
+   *
+   * Recursion cannot loop: a reference already being followed on the current
+   * branch is not followed again, and chains stop at {@link MAX_REF_DEPTH}.
+   */
+  followRefs?: boolean;
+  /**
+   * Document root that `$ref` pointers resolve against. Defaults to `root`,
+   * which is correct whenever the walk starts at the whole document.
+   */
+  refRoot?: JsonSchema;
+}
+
 /**
  * Visit `root` and every subschema beneath it, depth-first in a deterministic
  * order. Boolean `additionalProperties` is not a schema and is not visited.
+ *
+ * With `followRefs`, resolvable `$ref` targets are visited too — see
+ * {@link WalkOptions}.
  */
 export function walkSchema(
   root: JsonSchema,
   rootPath: string,
   visit: (entry: SchemaVisit) => void,
+  options: WalkOptions = {},
 ): void {
-  const stack: SchemaVisit[] = [{ schema: root, path: rootPath }];
+  const followRefs = options.followRefs ?? false;
+  const refRoot = options.refRoot ?? root;
+
+  // The stack carries the chain of references followed to reach each entry, so
+  // a cycle is stopped without that state leaking into the public visit shape.
+  const stack: { entry: SchemaVisit; refs: readonly string[] }[] = [
+    { entry: { schema: root, path: rootPath }, refs: [] },
+  ];
 
   while (stack.length > 0) {
-    const entry = stack.pop() as SchemaVisit;
+    const { entry, refs } = stack.pop() as { entry: SchemaVisit; refs: readonly string[] };
     visit(entry);
 
     // Children are pushed in reverse so they pop in declaration order.
@@ -130,16 +238,38 @@ export function walkSchema(
       }
     }
 
+    // Pushed first so it pops last: a followed target is visited after the
+    // referring schema's own children.
+    const ref = followRefs ? schema['$ref'] : undefined;
+    if (typeof ref === 'string' && !refs.includes(ref) && refs.length < MAX_REF_DEPTH) {
+      const target = lookupRef(refRoot, ref);
+      if (target.kind === 'found') {
+        stack.push({
+          entry: {
+            schema: target.schema,
+            path: joinPath(path, '$ref'),
+            keyword: '$ref',
+            parent: schema,
+          },
+          refs: [...refs, ref],
+        });
+      }
+    }
+
     for (let i = children.length - 1; i >= 0; i -= 1) {
-      stack.push(children[i] as SchemaVisit);
+      stack.push({ entry: children[i] as SchemaVisit, refs });
     }
   }
 }
 
 /** Collect every subschema, root first, in deterministic order. */
-export function collectSchemas(root: JsonSchema, rootPath: string): SchemaVisit[] {
+export function collectSchemas(
+  root: JsonSchema,
+  rootPath: string,
+  options: WalkOptions = {},
+): SchemaVisit[] {
   const out: SchemaVisit[] = [];
-  walkSchema(root, rootPath, (entry) => out.push(entry));
+  walkSchema(root, rootPath, (entry) => out.push(entry), options);
   return out;
 }
 
