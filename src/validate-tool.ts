@@ -1,5 +1,6 @@
 import type { CanonicalTool, JsonSchema } from './types.js';
 import { asSchema, collectSchemas, isPlainObject, joinPath, schemaTypes } from './schema.js';
+import { resolveSchemaRefs } from './resolve.js';
 
 export interface ToolValidationIssue {
   message: string;
@@ -61,7 +62,32 @@ export function validateCanonicalTool(value: unknown, basePath = ''): ToolValida
   }
 
   issues.push(...validateSubschemas(inputSchema, at('inputSchema')));
+  issues.push(...validateReferences(inputSchema, at('inputSchema')));
   return issues;
+}
+
+/**
+ * `$ref` codes that make a tool definition structurally invalid.
+ *
+ * A reference nothing can follow is a defect in the document itself, so the
+ * tool is refused at load rather than compiled around a hole. The codes left
+ * out are deliberate:
+ *
+ *  - `recursive-ref` — a recursive schema is well formed, and some targets
+ *    (OpenAI, for one) accept it. Core cannot inline it, and says so through
+ *    `resolveSchemaRefs` and `validateValue`, but refusing to *load* it would
+ *    make a schema those targets support unexpressible.
+ *  - `anchor-ref` — `$anchor` is valid JSON Schema that core does not index.
+ *    Not resolving it is core's limitation, not the author's mistake.
+ *  - `ref-depth-exceeded` — likewise a limit of the resolver, not a defect.
+ */
+const STRUCTURAL_REF_CODES = new Set(['external-ref', 'dangling-ref', 'invalid-ref']);
+
+function validateReferences(inputSchema: JsonSchema, rootPath: string): ToolValidationIssue[] {
+  const { issues } = resolveSchemaRefs(inputSchema, { rootPath });
+  return issues
+    .filter((issue) => STRUCTURAL_REF_CODES.has(issue.code))
+    .map((issue) => ({ message: issue.message, path: issue.path }));
 }
 
 function validateSubschemas(root: JsonSchema, rootPath: string): ToolValidationIssue[] {

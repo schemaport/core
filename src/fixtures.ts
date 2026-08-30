@@ -124,6 +124,109 @@ export const constraintTool: CanonicalTool = {
   },
 };
 
+/* -------------------------------------------------------------------------- */
+/* Reference fixtures                                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * Tools exercising `$ref`, kept out of {@link FIXTURE_TOOLS} on purpose.
+ *
+ * `FIXTURE_TOOLS` is the set every provider package compiles end to end, and
+ * three of them iterate it wholesale; three of the four tools below are not
+ * meant to compile at all. They live in {@link REF_FIXTURE_TOOLS} so each
+ * repository can opt into the reference cases it actually has an answer for.
+ */
+
+/** A reference into `$defs` that resolves cleanly, with a sibling description. */
+export const refDefsTool: CanonicalTool = {
+  name: 'record_payment',
+  description: 'Records a payment against an invoice',
+  inputSchema: {
+    type: 'object',
+    $defs: {
+      Money: {
+        type: 'object',
+        properties: {
+          amount: { type: 'number', minimum: 0 },
+          currency: { type: 'string', minLength: 3, maxLength: 3 },
+        },
+        required: ['amount', 'currency'],
+      },
+    },
+    properties: {
+      invoiceId: { type: 'string' },
+      total: { $ref: '#/$defs/Money', description: 'The amount received' },
+      fee: { $ref: '#/$defs/Money' },
+    },
+    required: ['invoiceId', 'total'],
+  },
+};
+
+/**
+ * A schema that refers to itself through its own `$defs`.
+ *
+ * Well formed, and some targets accept it — but no finite inlining exists, so
+ * SchemaPort reports the cycle and leaves the reference in place.
+ */
+export const recursiveTool: CanonicalTool = {
+  name: 'render_tree',
+  description: 'Renders a tree of nodes',
+  inputSchema: {
+    type: 'object',
+    $defs: {
+      Node: {
+        type: 'object',
+        properties: {
+          label: { type: 'string' },
+          children: { type: 'array', items: { $ref: '#/$defs/Node' } },
+        },
+        required: ['label'],
+      },
+    },
+    properties: {
+      root: { $ref: '#/$defs/Node' },
+    },
+    required: ['root'],
+  },
+};
+
+/** A reference to a definition that does not exist. Structurally invalid. */
+export const danglingRefTool: CanonicalTool = {
+  name: 'apply_coupon',
+  description: 'Applies a coupon to a cart',
+  inputSchema: {
+    type: 'object',
+    $defs: {
+      Coupon: { type: 'string' },
+    },
+    properties: {
+      coupon: { $ref: '#/$defs/Discount' },
+    },
+    required: ['coupon'],
+  },
+};
+
+/** A reference into another document. Nothing in core can fetch it. */
+export const externalRefTool: CanonicalTool = {
+  name: 'ship_parcel',
+  description: 'Ships a parcel to an address',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      address: { $ref: 'https://example.com/schemas/address.json' },
+    },
+    required: ['address'],
+  },
+};
+
+/** The reference fixtures, keyed by tool name. */
+export const REF_FIXTURE_TOOLS: Readonly<Record<string, CanonicalTool>> = Object.freeze({
+  record_payment: refDefsTool,
+  render_tree: recursiveTool,
+  apply_coupon: danglingRefTool,
+  ship_parcel: externalRefTool,
+});
+
 /** All shared fixtures, keyed by tool name. */
 export const FIXTURE_TOOLS: Readonly<Record<string, CanonicalTool>> = Object.freeze({
   refund_order: refundOrderTool,
@@ -143,4 +246,6 @@ export const INVALID_TOOL_VALUES: readonly unknown[] = Object.freeze([
   { name: 'bad_schema', inputSchema: { type: 'string' } },
   { name: 'bad required', inputSchema: { type: 'object', properties: {} } },
   { name: 'dangling_required', inputSchema: { type: 'object', properties: {}, required: ['nope'] } },
+  danglingRefTool,
+  externalRefTool,
 ]);

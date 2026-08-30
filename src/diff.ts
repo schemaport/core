@@ -6,6 +6,7 @@ import type {
   SchemaChange,
 } from './types.js';
 import { asSchema, compareStrings, deepEqual, isPlainObject, joinPath, schemaTypes } from './schema.js';
+import { hasRefs, resolveToolRefs } from './resolve.js';
 
 /**
  * Structural comparison of canonical tool schemas.
@@ -15,12 +16,21 @@ import { asSchema, compareStrings, deepEqual, isPlainObject, joinPath, schemaTyp
  * would a caller written against the old schema still work?* It does not attempt
  * general JSON Schema subsumption. Cases it cannot classify with confidence are
  * reported as breaking, because a false "safe" is the expensive mistake.
+ *
+ * Both sides are `$ref`-resolved first, so replacing an inline subschema with
+ * an equivalent reference — or pulling a repeated subschema out into `$defs` —
+ * is correctly reported as no change rather than a refactor that looks like a
+ * rewrite. A reference that could not be resolved is compared as a reference;
+ * see `diffRef`.
  */
 export function diffToolSets(
-  before: readonly CanonicalTool[],
-  after: readonly CanonicalTool[],
+  rawBefore: readonly CanonicalTool[],
+  rawAfter: readonly CanonicalTool[],
 ): DiffResult {
   const changes: SchemaChange[] = [];
+
+  const before = rawBefore.map(resolved);
+  const after = rawAfter.map(resolved);
 
   const beforeByName = new Map(before.map((tool) => [tool.name, tool]));
   const afterByName = new Map(after.map((tool) => [tool.name, tool]));
@@ -84,8 +94,11 @@ export function diffToolSets(
   return summarizeDiff(changes);
 }
 
-/** Compare two versions of the same tool. */
-export function diffTools(before: CanonicalTool, after: CanonicalTool): SchemaChange[] {
+/** Compare two versions of the same tool. Both sides are `$ref`-resolved first. */
+export function diffTools(rawBefore: CanonicalTool, rawAfter: CanonicalTool): SchemaChange[] {
+  const before = resolved(rawBefore);
+  const after = resolved(rawAfter);
+
   const changes: SchemaChange[] = [];
   const context: DiffContext = { toolName: before.name, changes };
 
@@ -99,9 +112,16 @@ export function diffTools(before: CanonicalTool, after: CanonicalTool): SchemaCh
 }
 
 /**
- * Group a flat change list into a `DiffResult`: the changes in canonical order,
- * plus a count per classification.
+ * Inline every resolvable reference before comparing.
+ *
+ * Idempotent, and free for the common case: a tool with no `$ref` is returned
+ * untouched, so `diffToolSets` resolving up front costs `diffTools` nothing.
  */
+function resolved(tool: CanonicalTool): CanonicalTool {
+  return hasRefs(tool.inputSchema) ? resolveToolRefs(tool).tool : tool;
+}
+
+/** Group a flat change list into a `DiffResult` with counts. */
 export function summarizeDiff(changes: readonly SchemaChange[]): DiffResult {
   const sorted = sortChanges(changes);
   return {
@@ -166,6 +186,7 @@ function record(
 }
 
 function diffSchema(before: JsonSchema, after: JsonSchema, path: string, context: DiffContext): void {
+  diffRef(before, after, path, context);
   diffTypes(before, after, path, context);
   diffEnum(before, after, path, context);
   diffConst(before, after, path, context);
@@ -174,7 +195,74 @@ function diffSchema(before: JsonSchema, after: JsonSchema, path: string, context
   diffArray(before, after, path, context);
   diffObject(before, after, path, context);
   diffComposition(before, after, path, context);
+  diffDefinitions(before, after, path, context);
   diffMetadata(before, after, path, context);
+}
+
+/**
+ * Compare definitions that survived resolution.
+ *
+ * A definition map is only still here because something referencing it could
+ * not be inlined — in practice, a recursive schema. Without this, editing a
+ * recursive definition would produce no change at all, since the use site is
+ * an opaque `$ref` on both sides: exactly the false "safe" this module exists
+ * to avoid.
+ *
+ * Only definitions present on both sides are compared. A definition that
+ * appeared or vanished is not itself a contract change: if anything still
+ * points at it, that shows up as a dangling reference, and if nothing does, it
+ * was never part of the tool's surface.
+ */
+function diffDefinitions(
+  before: JsonSchema,
+  after: JsonSchema,
+  path: string,
+  context: DiffContext,
+): void {
+  for (const keyword of ['$defs', 'definitions'] as const) {
+    const oldMap = isPlainObject(before[keyword]) ? before[keyword] : undefined;
+    const newMap = isPlainObject(after[keyword]) ? after[keyword] : undefined;
+    if (!oldMap || !newMap) continue;
+
+    for (const name of Object.keys(oldMap)) {
+      const oldChild = asSchema(oldMap[name]);
+      const newChild = asSchema(newMap[name]);
+      if (oldChild && newChild) diffSchema(oldChild, newChild, joinPath(path, keyword, name), context);
+    }
+  }
+}
+
+/* --- unresolved references ------------------------------------------------ */
+
+/**
+ * Compare a `$ref` that survived resolution.
+ *
+ * Anything still carrying a `$ref` here is external, dangling or recursive, so
+ * there is nothing behind it to compare. Every variant is therefore breaking:
+ * a change across an opaque reference cannot be proven safe, and this diff's
+ * standing rule is that the false "safe" is the expensive mistake.
+ */
+function diffRef(before: JsonSchema, after: JsonSchema, path: string, context: DiffContext): void {
+  const oldRef = typeof before.$ref === 'string' ? before.$ref : undefined;
+  const newRef = typeof after.$ref === 'string' ? after.$ref : undefined;
+  if (oldRef === newRef) return;
+
+  const refPath = joinPath(path, '$ref');
+  if (oldRef === undefined) {
+    record(context, 'breaking', 'ref-added', refPath,
+      `An unresolvable \`$ref\` (${newRef}) replaced an inline schema. SchemaPort cannot see what it now accepts.`,
+      undefined, newRef);
+    return;
+  }
+  if (newRef === undefined) {
+    record(context, 'breaking', 'ref-removed', refPath,
+      `An unresolvable \`$ref\` (${oldRef}) was replaced by an inline schema. SchemaPort could not see what it accepted before.`,
+      oldRef);
+    return;
+  }
+  record(context, 'breaking', 'ref-changed', refPath,
+    `An unresolvable \`$ref\` changed from ${oldRef} to ${newRef}. SchemaPort cannot compare across it.`,
+    oldRef, newRef);
 }
 
 /* --- types ---------------------------------------------------------------- */
@@ -375,56 +463,78 @@ function diffArray(before: JsonSchema, after: JsonSchema, path: string, context:
 
 /* --- objects -------------------------------------------------------------- */
 
+/** The `properties` map of an object schema; values are subschemas. */
+type PropertyMap = Readonly<Record<string, unknown>>;
+
 function diffObject(before: JsonSchema, after: JsonSchema, path: string, context: DiffContext): void {
   const oldProperties = isPlainObject(before.properties) ? before.properties : undefined;
   const newProperties = isPlainObject(after.properties) ? after.properties : undefined;
-  const oldRequired = new Set(Array.isArray(before.required) ? before.required : []);
-  const newRequired = new Set(Array.isArray(after.required) ? after.required : []);
 
   if (oldProperties || newProperties) {
-    const oldKeys = Object.keys(oldProperties ?? {});
-    const newKeys = Object.keys(newProperties ?? {});
-
-    for (const key of oldKeys) {
-      if (newKeys.includes(key)) continue;
-      record(context, 'breaking', 'property-removed', joinPath(path, 'properties', key),
-        `Property \`${key}\` was removed.`, (oldProperties ?? {})[key]);
-    }
-
-    for (const key of newKeys) {
-      if (oldKeys.includes(key)) continue;
-      const propertyPath = joinPath(path, 'properties', key);
-      if (newRequired.has(key)) {
-        record(context, 'breaking', 'required-property-added', propertyPath,
-          `Required property \`${key}\` was added. Existing callers do not send it.`,
-          undefined, (newProperties ?? {})[key]);
-      } else {
-        record(context, 'non-breaking', 'optional-property-added', propertyPath,
-          `Optional property \`${key}\` was added.`, undefined, (newProperties ?? {})[key]);
-      }
-    }
-
-    for (const key of oldKeys) {
-      if (!newKeys.includes(key)) continue;
-      const oldChild = asSchema((oldProperties ?? {})[key]);
-      const newChild = asSchema((newProperties ?? {})[key]);
-      if (oldChild && newChild) {
-        diffSchema(oldChild, newChild, joinPath(path, 'properties', key), context);
-      }
-
-      const wasRequired = oldRequired.has(key);
-      const isRequired = newRequired.has(key);
-      if (!wasRequired && isRequired) {
-        record(context, 'breaking', 'property-made-required', joinPath(path, 'required'),
-          `Optional property \`${key}\` is now required.`, false, true);
-      } else if (wasRequired && !isRequired) {
-        record(context, 'non-breaking', 'property-made-optional', joinPath(path, 'required'),
-          `Required property \`${key}\` is now optional.`, true, false);
-      }
-    }
+    diffProperties(
+      { properties: oldProperties ?? {}, required: requiredNames(before) },
+      { properties: newProperties ?? {}, required: requiredNames(after) },
+      path,
+      context,
+    );
   }
 
   diffAdditionalProperties(before, after, path, context);
+}
+
+interface ObjectSide {
+  properties: PropertyMap;
+  required: ReadonlySet<string>;
+}
+
+function requiredNames(schema: JsonSchema): ReadonlySet<string> {
+  return new Set(Array.isArray(schema.required) ? schema.required : []);
+}
+
+function diffProperties(before: ObjectSide, after: ObjectSide, path: string, context: DiffContext): void {
+  const oldKeys = Object.keys(before.properties);
+  const newKeys = Object.keys(after.properties);
+  // Membership is checked once per key in three passes; sets keep that linear.
+  const oldKeySet = new Set(oldKeys);
+  const newKeySet = new Set(newKeys);
+
+  for (const key of oldKeys) {
+    if (newKeySet.has(key)) continue;
+    record(context, 'breaking', 'property-removed', joinPath(path, 'properties', key),
+      `Property \`${key}\` was removed.`, before.properties[key]);
+  }
+
+  for (const key of newKeys) {
+    if (oldKeySet.has(key)) continue;
+    const propertyPath = joinPath(path, 'properties', key);
+    if (after.required.has(key)) {
+      record(context, 'breaking', 'required-property-added', propertyPath,
+        `Required property \`${key}\` was added. Existing callers do not send it.`,
+        undefined, after.properties[key]);
+    } else {
+      record(context, 'non-breaking', 'optional-property-added', propertyPath,
+        `Optional property \`${key}\` was added.`, undefined, after.properties[key]);
+    }
+  }
+
+  for (const key of oldKeys) {
+    if (!newKeySet.has(key)) continue;
+    const oldChild = asSchema(before.properties[key]);
+    const newChild = asSchema(after.properties[key]);
+    if (oldChild && newChild) {
+      diffSchema(oldChild, newChild, joinPath(path, 'properties', key), context);
+    }
+
+    const wasRequired = before.required.has(key);
+    const isRequired = after.required.has(key);
+    if (!wasRequired && isRequired) {
+      record(context, 'breaking', 'property-made-required', joinPath(path, 'required'),
+        `Optional property \`${key}\` is now required.`, false, true);
+    } else if (wasRequired && !isRequired) {
+      record(context, 'non-breaking', 'property-made-optional', joinPath(path, 'required'),
+        `Required property \`${key}\` is now optional.`, true, false);
+    }
+  }
 }
 
 function diffAdditionalProperties(
