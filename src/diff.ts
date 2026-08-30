@@ -26,6 +26,7 @@ import { hasRefs, resolveToolRefs } from './resolve.js';
 export function diffToolSets(
   rawBefore: readonly CanonicalTool[],
   rawAfter: readonly CanonicalTool[],
+  options?: DiffOptions,
 ): DiffResult {
   const changes: SchemaChange[] = [];
 
@@ -91,11 +92,51 @@ export function diffToolSets(
     if (next) changes.push(...diffTools(tool, next));
   }
 
-  return summarizeDiff(changes);
+  return summarizeDiff(applyDiffOptions(changes, options));
+}
+
+/**
+ * Change codes that report nothing but a prose edit.
+ *
+ * These are what `ignoreDescriptions` filters. `title-changed` is in the list
+ * because `title` is display text like `description` is. `format-changed`,
+ * `default-changed` and `examples-changed` are not: they are classified
+ * informational because SchemaPort will not claim they break a caller, but
+ * each one can change what a model sends.
+ */
+const DESCRIPTION_CHANGE_CODES: readonly string[] = Object.freeze([
+  'tool-description-changed',
+  'description-changed',
+  'title-changed',
+]);
+
+/** Options shared by {@link diffTools} and {@link diffToolSets}. */
+export interface DiffOptions {
+  /**
+   * Drop changes that only report an edit to `description` or `title`.
+   *
+   * Prose is edited constantly and never breaks a caller, so on a large tool
+   * set those changes can bury the ones that matter. Off by default: a
+   * description is what the model reads to decide whether to call the tool at
+   * all, so hiding an edit to it is a choice, not a default.
+   */
+  ignoreDescriptions?: boolean;
+}
+
+function applyDiffOptions(
+  changes: readonly SchemaChange[],
+  options: DiffOptions | undefined,
+): SchemaChange[] {
+  if (options?.ignoreDescriptions !== true) return [...changes];
+  return changes.filter((change) => !DESCRIPTION_CHANGE_CODES.includes(change.code));
 }
 
 /** Compare two versions of the same tool. Both sides are `$ref`-resolved first. */
-export function diffTools(rawBefore: CanonicalTool, rawAfter: CanonicalTool): SchemaChange[] {
+export function diffTools(
+  rawBefore: CanonicalTool,
+  rawAfter: CanonicalTool,
+  options?: DiffOptions,
+): SchemaChange[] {
   const before = resolved(rawBefore);
   const after = resolved(rawAfter);
 
@@ -108,7 +149,7 @@ export function diffTools(rawBefore: CanonicalTool, rawAfter: CanonicalTool): Sc
   }
 
   diffSchema(before.inputSchema, after.inputSchema, 'inputSchema', context);
-  return sortChanges(changes);
+  return sortChanges(applyDiffOptions(changes, options));
 }
 
 /**
