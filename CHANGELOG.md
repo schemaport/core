@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`summarizeDiff`.** New name for the helper that groups a flat `SchemaChange[]`
+  into a `DiffResult` — the sorted changes plus a count per classification. The
+  behaviour and signature are unchanged; the name is more accurate, because the
+  function returns the diff result itself rather than a summary of it.
 - **`$ref` resolution.** `resolveSchemaRefs(schema, options?)` inlines every
   same-document JSON Pointer reference and reports every one it cannot follow.
   Handles `#/$defs/<name>`, `#/definitions/<name>`, general pointers such as
@@ -29,6 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Reference fixtures.** `refDefsTool`, `recursiveTool`, `danglingRefTool`,
   `externalRefTool` and `REF_FIXTURE_TOOLS`, kept out of `FIXTURE_TOOLS` because
   three of them are not meant to compile.
+
+### Deprecated
+
+- **`summarizeChanges`.** Deprecated in favour of `summarizeDiff`. It remains
+  exported and is the same function, so existing callers keep working with no
+  change; it is now marked `@deprecated` so editors surface the replacement. No
+  removal is scheduled.
 
 ### Changed
 

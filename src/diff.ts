@@ -91,7 +91,7 @@ export function diffToolSets(
     if (next) changes.push(...diffTools(tool, next));
   }
 
-  return summarizeChanges(changes);
+  return summarizeDiff(changes);
 }
 
 /** Compare two versions of the same tool. Both sides are `$ref`-resolved first. */
@@ -122,7 +122,7 @@ function resolved(tool: CanonicalTool): CanonicalTool {
 }
 
 /** Group a flat change list into a `DiffResult` with counts. */
-export function summarizeChanges(changes: readonly SchemaChange[]): DiffResult {
+export function summarizeDiff(changes: readonly SchemaChange[]): DiffResult {
   const sorted = sortChanges(changes);
   return {
     changes: sorted,
@@ -133,6 +133,13 @@ export function summarizeChanges(changes: readonly SchemaChange[]): DiffResult {
     },
   };
 }
+
+/**
+ * @deprecated Renamed to {@link summarizeDiff}. This alias is the same function
+ * and will keep working; it is kept so dependent packages do not break. Prefer
+ * `summarizeDiff` in new code.
+ */
+export const summarizeChanges: typeof summarizeDiff = summarizeDiff;
 
 const CLASSIFICATION_ORDER: Record<ChangeClassification, number> = {
   breaking: 0,
