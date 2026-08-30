@@ -165,6 +165,43 @@ advisory: no provider guarantees enforcement, so adding `format: "email"` does
 not actually narrow what will be accepted. If you rely on format enforcement,
 add an explicit `pattern` — which *is* classified.
 
+## Hiding prose edits
+
+Descriptions are edited constantly and never break a caller. On a large tool
+set those changes bury the ones that matter, so both entry points take an
+option:
+
+```ts
+diffTools(before, after, { ignoreDescriptions: true });
+diffToolSets(before, after, { ignoreDescriptions: true });
+```
+
+It drops exactly three codes:
+
+| Dropped | Kept |
+|---|---|
+| `tool-description-changed` | `format-changed` |
+| `description-changed` | `default-changed` |
+| `title-changed` | `examples-changed` |
+
+`title` is dropped because it is display text like `description` is.
+
+The other three are informational but **not** cosmetic, and are deliberately
+kept. They are informational because SchemaPort will not claim they break a
+caller — not because they have no effect. Each one can change what the model
+sends: `default` and `examples` are read as guidance, and a changed `format`
+changes what the model tries to produce even where nothing enforces it. Folding
+them in would make the option quietly lossier than its name.
+
+The option is **off by default**. A description is what the model reads to
+decide whether to call a tool at all, so an edit to one is a real change to
+behaviour even though it is not a breaking change to a caller. Hiding it should
+be a choice.
+
+`diffToolSets` filters once, at the end. Two consequences: the `summary` counts
+always match the changes actually returned, and prose changes reported inside a
+detected rename are filtered too.
+
 ## Determinism
 
 Changes are sorted by tool name, then classification, then path, then code. The

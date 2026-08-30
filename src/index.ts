@@ -95,6 +95,7 @@ export {
 export type { ProbeAcceptedInput } from './probe.js';
 
 export { diffToolSets, diffTools, summarizeDiff } from './diff.js';
+export type { DiffOptions } from './diff.js';
 /** @deprecated Renamed to `summarizeDiff`. The old name still works. */
 export { summarizeChanges } from './diff.js';
 

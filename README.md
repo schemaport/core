@@ -28,7 +28,7 @@ npm install @schemaport/core
 | Compilation policy | `finalizeCompile`, `transformation`, `isLossy` |
 | Probing | `probeAccepted`, `probeRejected`, `probeMissingCredentials`, `probeCompileRefused`, `probeError`, `probeSkipped`, `classifyProviderError`, `resolveApiKey`, `resolveProbeModel`, `probePrompt` |
 | Value validation | `validateValue` |
-| Diff | `diffToolSets`, `diffTools`, `summarizeDiff` (`summarizeChanges` is a deprecated alias) |
+| Diff | `diffToolSets`, `diffTools`, `summarizeDiff`, `DiffOptions` (`summarizeChanges` is a deprecated alias) |
 | Adapter contract | `SchemaPortProvider` |
 | Shared fixtures | `refundOrderTool`, `nestedTool`, `openMapTool`, `unionTool`, `constraintTool`, `minimalTool`, `FIXTURE_TOOLS`, `INVALID_TOOL_VALUES` |
 | Reference fixtures | `refDefsTool`, `recursiveTool`, `danglingRefTool`, `externalRefTool`, `REF_FIXTURE_TOOLS` |
@@ -46,6 +46,11 @@ const current = tools.map((entry) => entry.tool);
 
 const { changes, summary } = diffToolSets(previous, current);
 console.log(`${summary.breaking} breaking changes`);
+
+// Prose edits bury the changes that matter on a large tool set. Both entry
+// points can drop them; `format`, `default` and `examples` are kept, because
+// each can change what the model sends.
+diffToolSets(previous, current, { ignoreDescriptions: true });
 
 // Check a value against a canonical schema. Same-document `$ref` is resolved
 // first, so a constraint that only exists behind a reference is really checked.
