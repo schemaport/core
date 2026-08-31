@@ -92,7 +92,7 @@ It implements the supported subset only, and is explicit about its gaps:
   behind a reference is genuinely checked. A reference that cannot be
   resolved — external, dangling, recursive — reports that the value could not
   be verified, and says why. It never silently passes.
-- `not`, `if`/`then`/`else` and `dependentSchemas` are ignored.
+- `if`/`then`/`else` and `dependentSchemas` are ignored.
 - `format` is not enforced (providers treat it as advisory).
 
 ```
@@ -103,6 +103,28 @@ $.root: contains `$ref` `#/$defs/Node`, which SchemaPort could not resolve;
 
 Everything around an unresolvable reference is still checked — one opaque
 pointer does not make the whole value unverifiable.
+
+Every "could not resolve" error carries `UNVERIFIED_MARKER`, which is exported
+so a caller can tell *nothing was checked here* apart from *this value is
+wrong*. `validateSchemaValues` uses it to stay silent about a `default` sitting
+behind a reference it cannot follow.
+
+## Schema self-consistency
+
+`validateSchemaValues(schema, path)` checks that a schema's own literals satisfy
+the schema declaring them. `validateCanonicalTool` runs it, so loading a tool
+catches this:
+
+```
+`default` is 0, which its own schema rejects: value: 0 is below minimum 10.
+  Path: inputSchema.properties.amount.default
+```
+
+Only `default` and `const` are checked, and only once the schema is otherwise
+structurally sound — validating a literal against a malformed schema produces
+errors about the malformation, reported at the wrong keyword. See
+[canonical-tool-format.md](canonical-tool-format.md) for why `examples` is
+excluded.
 
 Errors are returned sorted, so results are deterministic.
 

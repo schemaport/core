@@ -1,5 +1,6 @@
 import type { CanonicalTool, JsonSchema } from './types.js';
 import { asSchema, collectSchemas, isPlainObject, joinPath, schemaTypes } from './schema.js';
+import { validateSchemaValues } from './validate-schema-values.js';
 import { resolveSchemaRefs } from './resolve.js';
 
 export interface ToolValidationIssue {
@@ -63,6 +64,14 @@ export function validateCanonicalTool(value: unknown, basePath = ''): ToolValida
 
   issues.push(...validateSubschemas(inputSchema, at('inputSchema')));
   issues.push(...validateReferences(inputSchema, at('inputSchema')));
+
+  // Only worth running once the schema is structurally sound. Validating a
+  // `default` against a malformed schema produces errors about the
+  // malformation, reported at the wrong keyword.
+  if (issues.length === 0) {
+    issues.push(...validateSchemaValues(inputSchema, at('inputSchema')));
+  }
+
   return issues;
 }
 
