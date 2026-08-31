@@ -27,7 +27,7 @@ npm install @schemaport/core
 | Diagnostics | `diagnostic`, `compilable`, `compilableLossy`, `notCompilable`, `sortDiagnostics`, `countBySeverity` |
 | Compilation policy | `finalizeCompile`, `transformation`, `isLossy` |
 | Probing | `probeAccepted`, `probeRejected`, `probeMissingCredentials`, `probeCompileRefused`, `probeError`, `probeSkipped`, `classifyProviderError`, `resolveApiKey`, `resolveProbeModel`, `probePrompt` |
-| Value validation | `validateValue` |
+| Value validation | `validateValue`, `validateSchemaValues` |
 | Diff | `diffToolSets`, `diffTools`, `summarizeDiff`, `DiffOptions` (`summarizeChanges` is a deprecated alias) |
 | Adapter contract | `SchemaPortProvider` |
 | Shared fixtures | `refundOrderTool`, `nestedTool`, `openMapTool`, `unionTool`, `constraintTool`, `minimalTool`, `FIXTURE_TOOLS`, `INVALID_TOOL_VALUES` |

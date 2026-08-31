@@ -281,3 +281,84 @@ describe('validateValue — refRoot', () => {
     expect(result.errors[0]).toContain('could not resolve');
   });
 });
+
+describe('not', () => {
+  it('rejects a value that matches the excluded subschema', () => {
+    const result = validateValue({ not: { type: 'string' } }, 'excluded');
+
+    expect(result.valid).toBe(false);
+    expect(result.errors[0]).toContain('matches the `not` subschema');
+  });
+
+  it('accepts a value that does not match it', () => {
+    expect(validateValue({ not: { type: 'string' } }, 7).valid).toBe(true);
+  });
+
+  it('reports the failing path, not the inner reasons', () => {
+    const schema: JsonSchema = {
+      type: 'object',
+      properties: { a: { not: { type: 'number', minimum: 0 } } },
+    };
+    const result = validateValue(schema, { a: 5 });
+
+    expect(result.errors).toEqual(['$.a: value matches the `not` subschema, which excludes it.']);
+  });
+
+  it('composes with the rest of the schema', () => {
+    const schema: JsonSchema = { type: 'string', not: { const: 'reserved' } };
+
+    expect(validateValue(schema, 'fine').valid).toBe(true);
+    expect(validateValue(schema, 'reserved').valid).toBe(false);
+    expect(validateValue(schema, 7).valid).toBe(false);
+  });
+
+  it('ignores a non-schema `not`', () => {
+    expect(validateValue({ not: 'nonsense' } as unknown as JsonSchema, 1).valid).toBe(true);
+  });
+});
+
+describe('prefixItems', () => {
+  const tuple: JsonSchema = {
+    type: 'array',
+    prefixItems: [{ type: 'number' }, { type: 'string' }],
+  };
+
+  it('validates each position against its own subschema', () => {
+    expect(validateValue(tuple, [1, 'a']).valid).toBe(true);
+    expect(validateValue(tuple, ['a', 1]).errors).toEqual([
+      '$[0]: expected type number, received string.',
+      '$[1]: expected type string, received number.',
+    ]);
+  });
+
+  it('does not require the array to be as long as the tuple', () => {
+    // Length is `minItems`\'s job; `prefixItems` only types the positions present.
+    expect(validateValue(tuple, [1]).valid).toBe(true);
+    expect(validateValue(tuple, []).valid).toBe(true);
+  });
+
+  it('leaves the tail to `items`, per 2020-12', () => {
+    const withTail: JsonSchema = { ...tuple, items: { type: 'boolean' } };
+
+    expect(validateValue(withTail, [1, 'a', true, false]).valid).toBe(true);
+    expect(validateValue(withTail, [1, 'a', 'not a boolean']).errors).toEqual([
+      '$[2]: expected type boolean, received string.',
+    ]);
+  });
+
+  it('does not apply `items` to the prefixed positions', () => {
+    const withTail: JsonSchema = { ...tuple, items: { type: 'boolean' } };
+
+    expect(validateValue(withTail, [1, 'a']).valid).toBe(true);
+  });
+
+  it('still honours minItems and maxItems', () => {
+    expect(validateValue({ ...tuple, minItems: 2 }, [1]).errors).toEqual([
+      '$: array has fewer than minItems 2.',
+    ]);
+  });
+
+  it('ignores a non-array `prefixItems`', () => {
+    expect(validateValue({ prefixItems: {} } as unknown as JsonSchema, [1]).valid).toBe(true);
+  });
+});

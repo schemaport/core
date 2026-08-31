@@ -90,14 +90,33 @@ schema), `minProperties`, `maxProperties`.
 
 **Values** — `enum`, `const`, `default`, `examples`.
 
-**Composition** — `anyOf`, `oneOf`, `allOf`, `not` (walked, but `not` is not
-evaluated by `validateValue`).
+**Composition** — `anyOf`, `oneOf`, `allOf`, `not`.
 
 **Metadata** — `title`, `description`, `format`.
 
 **References** — `$ref`, `$defs`, `definitions`. **Same-document `$ref` is
 resolved**: see [References](#references) below for exactly what is followed and
 what is not.
+
+**Literal values must satisfy the schema they sit in.** JSON Schema does not
+validate `default` or `const` against their own subschema, so this is legal
+everywhere else:
+
+```json
+{ "type": "number", "minimum": 10, "default": 0 }
+{ "type": "string", "enum": ["basic", "pro"], "default": "enterprise" }
+```
+
+SchemaPort rejects both. A `default` is emitted by every adapter and read by the
+model as guidance, so an invalid one steers the model towards a call the schema
+will reject; a `const` that fails its sibling constraints describes a property
+no value can satisfy.
+
+`examples` is deliberately **not** checked. It is documentation, it is never
+sent as guidance, and a load issue removes the whole tool — losing a tool over a
+typo in a doc example would be worse than the typo. The check is also skipped
+where a `$ref` could not be resolved: "not verified" is not evidence of a bad
+value.
 
 **Boolean subschemas are rejected.** JSON Schema permits `{"properties": {"x": true}}`
 and `{"items": false}`, but SchemaPort's canonical format does not accept them.

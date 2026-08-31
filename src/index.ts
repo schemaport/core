@@ -60,6 +60,7 @@ export { displayPath, loadTools, toolFileBaseName } from './load.js';
 export type { LoadOptions } from './load.js';
 
 export { isCanonicalTool, validateCanonicalTool } from './validate-tool.js';
+export { validateSchemaValues } from './validate-schema-values.js';
 export type { ToolValidationIssue } from './validate-tool.js';
 
 export {
@@ -76,7 +77,7 @@ export type { DiagnosticInit, SeverityCounts } from './diagnostics.js';
 export { finalizeCompile, isLossy, transformation } from './compile.js';
 export type { FinalizeCompileInput } from './compile.js';
 
-export { validateValue } from './validate-value.js';
+export { UNVERIFIED_MARKER, validateValue } from './validate-value.js';
 export type { ValueValidationOptions, ValueValidationResult } from './validate-value.js';
 
 export {

@@ -30,7 +30,7 @@ export interface ValueValidationResult {
  *    through. A reference that cannot be resolved — external, dangling or
  *    recursive — is reported as unverifiable, with the reason, rather than
  *    silently passing.
- *  - `not`, `if`/`then`/`else`, and `dependentSchemas` are ignored.
+ *  - `if`/`then`/`else` and `dependentSchemas` are ignored.
  *  - `format` is not enforced.
  */
 export function validateValue(
@@ -49,6 +49,16 @@ export function validateValue(
   }
   return runValidation(resolved.schema, value, path, reasons);
 }
+
+/**
+ * Marker every "could not resolve this `$ref`" error carries.
+ *
+ * Those errors say *nothing was checked*, which is a different claim from
+ * "the value is wrong". Callers that need to tell the two apart — such as
+ * {@link validateSchemaValues} — filter on this rather than on the whole
+ * sentence, so the wording stays free to change.
+ */
+export const UNVERIFIED_MARKER = 'value not verified.';
 
 /** Reasons a `$ref` was left unresolved, keyed by the pointer itself. */
 type RefReasons = ReadonlyMap<string, string>;
@@ -84,7 +94,7 @@ function validateInto(
   if (typeof schema.$ref === 'string') {
     const reason = context.reasons.get(schema.$ref);
     errors.push(
-      `${path}: contains \`$ref\` \`${schema.$ref}\`, which SchemaPort could not resolve; value not verified.` +
+      `${path}: contains \`$ref\` \`${schema.$ref}\`, which SchemaPort could not resolve; ${UNVERIFIED_MARKER}` +
         (reason === undefined ? '' : ` ${reason}`),
     );
     return;
@@ -132,6 +142,14 @@ function validateInto(
     if (matches !== 1) {
       errors.push(`${path}: value matched ${matches} \`oneOf\` branches, expected exactly 1.`);
     }
+  }
+
+  // `not` inverts its subschema: the value is valid exactly when it does *not*
+  // satisfy it. Evaluated in isolation, like the `anyOf`/`oneOf` branches, so
+  // the inner failures are the point rather than something to report.
+  const not = asSchema(schema.not);
+  if (not && runValidation(not, value, path, context.reasons).valid) {
+    errors.push(`${path}: value matches the \`not\` subschema, which excludes it.`);
   }
 }
 
@@ -194,9 +212,22 @@ function validateArray(
     const seen = new Set(value.map((item) => JSON.stringify(item)));
     if (seen.size !== value.length) errors.push(`${path}: array items are not unique.`);
   }
+  // `prefixItems` types the array positionally. In 2020-12 `items` then applies
+  // to whatever is left over, so the two are complementary rather than
+  // alternatives: a tuple with a typed tail declares both.
+  const prefixItems = Array.isArray(schema.prefixItems) ? schema.prefixItems : [];
+  prefixItems.forEach((entry, index) => {
+    if (index >= value.length) return;
+    const sub = asSchema(entry);
+    if (sub) validateInto(sub, value[index], `${path}[${index}]`, context);
+  });
+
   const items = asSchema(schema.items);
   if (items) {
-    value.forEach((item, index) => validateInto(items, item, `${path}[${index}]`, context));
+    value.forEach((item, index) => {
+      if (index < prefixItems.length) return;
+      validateInto(items, item, `${path}[${index}]`, context);
+    });
   }
 }
 
